@@ -17,7 +17,7 @@ st.title("🎧 TrackGPT: Video Transcriber & Analyzer")
 
 # Set up API keys
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]  # Access the API key
-ASSEMBLYAI_API_KEY = st.secrets["OPENAI_API_KEY"]  # Access the API key
+ASSEMBLYAI_API_KEY = st.secrets["ASSEMBLYAI_API_KEY"]  # Access the API key
 
 # Input
 video_url = st.text_input("Enter a YouTube URL or local video path")
