@@ -26,8 +26,8 @@ class Config:
     """
 
     # --- Essential ---
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")  # Required OpenAI API key
-    ASSEMBLYAI_API_KEY: str = os.getenv("ASSEMBLYAI_API_KEY") # AssemblyAI API key
+    OPENAI_API_KEY: str = st.secrets["OPENAI_API_KEY"]  # Required OpenAI API key
+    ASSEMBLYAI_API_KEY: str = st.secrets["ASSEMBLYAI_API_KEY"] # AssemblyAI API key
 
     # --- Models ---
     WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "whisper-1")  # Default transcription model
