@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 import sys # Import sys for sys.stderr and sys.exit
+import streamlit as st
 
 load_dotenv()
 
