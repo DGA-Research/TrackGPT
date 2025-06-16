@@ -3,3 +3,4 @@ python-dotenv>=1.0.0
 yt-dlp>=2023.11.16
 tenacity>=8.2.3
 pydub
+assemblyai
