@@ -62,7 +62,8 @@ if run_btn and transcript_input and target_name:
     # Highlights
     with st.spinner("Writing Highlights..."):
         try:
-            bullets = extract_raw_bullet_data_from_text(transcript_input, target_name, metadata, OPENAI_API_KEY)
+            type = "format_text_highlight_prompt"
+            bullets = extract_raw_bullet_data_from_text(transcript_input, target_name, metadata, OPENAI_API_KEY, type)
         except Exception as e:
             bullets = []
             st.warning("Bullet extraction failed.")
@@ -117,7 +118,8 @@ elif run_btn and uploaded_file and target_name:
     # Highlights
     with st.spinner("Writing Highlights..."):
         try:
-            bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY)
+            type = "format_text_highlight_prompt"
+            bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY, type)
         except Exception as e:
             bullets = []
             st.warning("Bullet extraction failed.")
@@ -173,7 +175,8 @@ elif run_btn and video_url and target_name:
     with st.spinner("Writing Highlights..."):
         # Analyze
         try:
-            bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY)
+            type = "format_text_highlight_prompt"
+            bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY, type)
         except Exception as e:
             bullets = []
             st.warning("Bullet extraction failed.")
