@@ -222,7 +222,7 @@ elif run_btn and video_url and target_name:
             mime="audio/mpeg"
         )
 
-elif run_bullets and transcript_input and target_name:
+elif run_bullets and video_url and target_name:
      # Setup
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
