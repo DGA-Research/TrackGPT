@@ -43,7 +43,7 @@ if download_button and target_name:
     # Transcribe
     with st.spinner("Transcribing..."):
         try:
-            transcript = transcribe_file(transcript_input, OPENAI_API_KEY, ASSEMBLYAI_API_KEY)
+            transcript = transcribe_file(uploaded_file, OPENAI_API_KEY, ASSEMBLYAI_API_KEY)
             save_text_file(transcript, transcript_path)
         except Exception as e:
             st.error(f"Transcription failed: {e}")
