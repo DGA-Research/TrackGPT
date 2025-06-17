@@ -176,4 +176,5 @@ elif run_btn and video_url and target_name:
         # Output
         st.success("✅ Analysis complete!")
         st.download_button("📄 Download HTML Report", html, file_name=report_path.name)
+        st.download_button("Download MP3 File", mp3, filename=audio_str.name)
         st.markdown(html, unsafe_allow_html=True)
