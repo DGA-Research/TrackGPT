@@ -20,10 +20,6 @@ if "processing_done" not in st.session_state:
     st.session_state["processing_done"] = False
 if st.button("🔄 Start Over"):
     st.session_state.clear()
-    transcript_input = False
-    uploaded_file = False
-    video_url = False
-    target_name = False
 
 # Set up API keys
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]  # Access the API key
@@ -34,13 +30,13 @@ transcript_input = False
 uploaded_file = False
 download_button = st.checkbox("Enter my own mp3 file")
 if download_button:
-    uploaded_file = st.file_uploader("Upload an MP3 file", type=["mp3"])
+    uploaded_file = st.file_uploader("Upload an MP3 file", type=["mp3"], key="video_file")
 transcript_button = st.checkbox("Enter my own transcript file")
 if transcript_button:
-    transcript_input = st.text_area("Copy and paste transcript here")
-video_url = st.text_input("Enter a YouTube URL or local video path")
-target_name = st.text_input("Enter target name (person or entity)")
-run_btn = st.button("Run Analysis")
+    transcript_input = st.text_area("Copy and paste transcript here", key="transcript_input")
+video_url = st.text_input("Enter a video or audio URL", key="video_url")
+target_name = st.text_input("Target Name", key="target_name")
+run_btn = st.button("Run Analysis", key="run_btn")
 
 if run_btn and transcript_input and target_name:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
