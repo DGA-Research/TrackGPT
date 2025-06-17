@@ -22,7 +22,7 @@ ASSEMBLYAI_API_KEY = st.secrets["ASSEMBLYAI_API_KEY"]  # Access the API key
 # Input
 download_button = st.checkbox("Enter my own mp3 file")
 if download_button:
-    st.text_input("Enter a YouTube URL or local video path")
+    uploaded_file = st.file_uploader("Upload an MP3 file", type=["mp3"])
 transcript_button = st.checkbox("Enter my own transcript file")
 video_url = st.text_input("Enter a YouTube URL or local video path")
 target_name = st.text_input("Enter target name (person or entity)")
