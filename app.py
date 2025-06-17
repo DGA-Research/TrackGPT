@@ -45,7 +45,7 @@ if download_button and target_name:
             try:
                     transcript = transcribe_file(transcript_input, OPENAI_API_KEY, ASSEMBLYAI_API_KEY)
                     save_text_file(transcript, transcript_path)
-                except Exception as e:
+            except Exception as e:
                     st.error(f"Transcription failed: {e}")
                     st.stop()
         # Highlights
