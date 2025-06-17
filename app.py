@@ -38,7 +38,7 @@ transcript_button = st.checkbox("Enter my own transcript file")
 if transcript_button:
     transcript_input = st.text_area("Copy and paste transcript here", key="transcript_input")
 video_url = st.text_input("Enter a video or audio URL", key="video_url")
-target_name = st.text_input("Target Name", key="target_name")
+target_name = st.text_input("Target Name*", key="target_name")
 run_btn = st.button("Generate Tracking Report", key="run_btn")
 
 if run_btn and transcript_input and target_name:
@@ -152,7 +152,7 @@ elif run_btn and video_url and target_name:
             audio_str, metadata = download_audio(video_url, output_dir, base_filename)
         except Exception as e:
                 st.error(f"Download failed: {e}")
-                if st.button("🔄 Start Over: Try Again or Upload File as MP3"):
+                if st.button("🔄 Start Over: Invalid Link. Try Again or Upload File as MP3"):
                     st.session_state.clear()
                     str.stop()
 
