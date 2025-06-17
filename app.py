@@ -20,8 +20,8 @@ OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]  # Access the API key
 ASSEMBLYAI_API_KEY = st.secrets["ASSEMBLYAI_API_KEY"]  # Access the API key
 
 # Input
-transcript_input = FALSE
-uploaded_file = FALSE
+transcript_input = False
+uploaded_file = False
 download_button = st.checkbox("Enter my own mp3 file")
 if download_button:
     uploaded_file = st.file_uploader("Upload an MP3 file", type=["mp3"])
