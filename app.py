@@ -151,7 +151,6 @@ elif run_btn and video_url and target_name:
             audio_str, metadata = download_audio(video_url, output_dir, base_filename)
         except Exception as e:
                 st.error(f"Download failed: {e}")
-                st.stop()
                 if st.button("🔄 Start Over: Try Again or Upload File as MP3"):
                     st.session_state.clear()
 
