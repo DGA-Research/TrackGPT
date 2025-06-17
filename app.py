@@ -58,7 +58,7 @@ if run_btn and transcript_input and target_name:
     # Report
     with st.spinner("Formatting Tracking Report..."):
         try:
-            html = generate_html_report(metadata, bullets, transcript, target_name)
+            html = generate_html_report(metadata, bullets, transcript_input, target_name)
             save_text_file(html, report_path)
         except Exception as e:
             st.error(f"Failed to generate report: {e}")
