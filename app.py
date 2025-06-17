@@ -37,9 +37,9 @@ if download_button:
 transcript_button = st.checkbox("Enter my own transcript file")
 if transcript_button:
     transcript_input = st.text_area("Copy and paste transcript here", key="transcript_input")
-video_url = st.text_input("Enter a video or audio URL", key="video_url")
-target_name = st.text_input("Target Name*", key="target_name")
-run_btn = st.button("Generate Tracking Report", key="run_btn")
+video_url = st.text_input("Enter a video or audio URL. See [Supported Sources](%s)" % url)
+target_name = st.text_input("Target Name*")
+run_btn = st.button("Generate Tracking Report")
 
 if run_btn and transcript_input and target_name:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
