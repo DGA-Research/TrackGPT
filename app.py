@@ -30,10 +30,10 @@ ASSEMBLYAI_API_KEY = st.secrets["ASSEMBLYAI_API_KEY"]  # Access the API key
 # Input
 transcript_input = False
 uploaded_file = False
-download_button = st.checkbox("Enter my own mp3 file")
+download_button = st.checkbox("Enter my own mp3 or m4a file")
 if download_button:
-    uploaded_file = st.file_uploader("Upload an MP3 file", type=["mp3"], key="video_file")
-    uploaded_file = st.file_uploader("Upload an M4A file", type=["m4a"], key="video_file2")
+    uploaded_file = st.file_uploader("Upload an mp3 file", type=["mp3"], key="video_file")
+    uploaded_file = st.file_uploader("Upload an m4a file", type=["m4a"], key="video_file2")
 transcript_button = st.checkbox("Enter my own transcript file")
 if transcript_button:
     transcript_input = st.text_area("Copy and paste transcript here", key="transcript_input")
