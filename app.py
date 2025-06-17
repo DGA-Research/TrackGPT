@@ -41,30 +41,30 @@ if download_button and target_name:
         transcript_path = output_dir / f"{base_filename}_transcript.txt"
         report_path = output_dir / f"{base_filename}_report.html"
     # Transcribe
-    with st.spinner("Transcribing..."):
-        try:
-                transcript = transcribe_file(transcript_input, OPENAI_API_KEY, ASSEMBLYAI_API_KEY)
-                save_text_file(transcript, transcript_path)
+        with st.spinner("Transcribing..."):
+            try:
+                    transcript = transcribe_file(transcript_input, OPENAI_API_KEY, ASSEMBLYAI_API_KEY)
+                    save_text_file(transcript, transcript_path)
+                except Exception as e:
+                    st.error(f"Transcription failed: {e}")
+                    st.stop()
+        # Highlights
+        with st.spinner("Writing Highlights..."):
+            # Analyze
+            try:
+                bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY)
             except Exception as e:
-                st.error(f"Transcription failed: {e}")
+                bullets = []
+                st.warning("Bullet extraction failed.")
+    
+         with st.spinner("Formatting Tracking Report..."):
+            # Report
+            try:
+            html = generate_html_report(metadata, bullets, transcript, target_name)
+                save_text_file(html, report_path)
+            except Exception as e:
+                st.error(f"Failed to generate report: {e}")
                 st.stop()
-    # Highlights
-     with st.spinner("Writing Highlights..."):
-        # Analyze
-        try:
-            bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY)
-        except Exception as e:
-            bullets = []
-            st.warning("Bullet extraction failed.")
-
-     with st.spinner("Formatting Tracking Report..."):
-        # Report
-        try:
-        html = generate_html_report(metadata, bullets, transcript, target_name)
-            save_text_file(html, report_path)
-        except Exception as e:
-            st.error(f"Failed to generate report: {e}")
-            st.stop()
 
         # Output
         st.success("✅ Analysis complete!")
