@@ -39,6 +39,14 @@ if run_btn and uploaded_file and target_name:
     audio_path = uploaded_file
     transcript_path = output_dir / f"{base_filename}_transcript.txt"
     report_path = output_dir / f"{base_filename}_report.html"
+
+    video_metadata = {
+                    'title': f"Existing file: {audio_path.name}",
+                    'uploader': "Unknown (Download Skipped)",
+                    'upload_date': None,
+                    'webpage_url': "N/A",
+                    'extractor': "Local file",
+                }
     
     # Transcribe
     with st.spinner("Transcribing..."):
@@ -52,7 +60,7 @@ if run_btn and uploaded_file and target_name:
     # Highlights
     with st.spinner("Writing Highlights..."):
         try:
-            bullets = extract_raw_bullet_data_from_text(transcript, target_name, OPENAI_API_KEY)
+            bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY)
         except Exception as e:
             bullets = []
             st.warning("Bullet extraction failed.")
@@ -60,7 +68,7 @@ if run_btn and uploaded_file and target_name:
     # Report
     with st.spinner("Formatting Tracking Report..."):
         try:
-            html = generate_html_report(bullets, transcript, target_name)
+            html = generate_html_report(metadata, bullets, transcript, target_name)
             save_text_file(html, report_path)
         except Exception as e:
             st.error(f"Failed to generate report: {e}")
