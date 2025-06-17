@@ -38,6 +38,14 @@ if run_btn and transcript_input and target_name:
     output_dir.mkdir(parents=True, exist_ok=True)
     transcript_path = output_dir / f"{base_filename}_transcript.txt"
     report_path = output_dir / f"{base_filename}_report.html"
+
+    metadata = {
+                    'title': f"Existing file: {audio_path.name}",
+                    'uploader': "Unknown (Download Skipped)",
+                    'upload_date': None,
+                    'webpage_url': "N/A",
+                    'extractor': "Local file",
+                }
     
     # Highlights
     with st.spinner("Writing Highlights..."):
