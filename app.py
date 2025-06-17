@@ -177,27 +177,32 @@ elif run_btn and video_url and target_name:
 
     # Output
     st.success("✅ Analysis complete!")
-    # HTML Report download
+
+    # Save HTML and MP3 to session state to survive re-runs
+    st.session_state["html_report"] = html
+    try:
+        with open(audio_path, "rb") as f:
+            mp3_bytes = f.read()
+        st.session_state["mp3_data"] = mp3_bytes
+    except Exception as e:
+        st.warning(f"Could not prepare MP3 download: {e}")
+        st.session_state["mp3_data"] = None
+
+    # Show HTML report before any buttons (so it doesn’t disappear)
+    st.markdown(st.session_state["html_report"], unsafe_allow_html=True)
+
+    # Download buttons (after rendering the report)
     st.download_button(
         "📄 Download HTML Report",
-        data=html,
+        data=st.session_state["html_report"],
         file_name=report_path.name,
         mime="text/html"
     )
 
-    # MP3 download
-    try:
-        with open(audio_path, "rb") as f:
-            mp3_bytes = f.read()
+    if st.session_state["mp3_data"]:
         st.download_button(
             "🎵 Download MP3 File",
-            data=mp3_bytes,
+            data=st.session_state["mp3_data"],
             file_name=audio_path.name,
             mime="audio/mpeg"
         )
-    except Exception as e:
-        st.warning(f"Could not prepare MP3 download: {e}")
-
-    # Inline HTML display
-    st.markdown(html, unsafe_allow_html=True)
-    st.markdown(html, unsafe_allow_html=True)
