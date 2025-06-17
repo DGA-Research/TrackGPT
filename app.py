@@ -30,6 +30,40 @@ video_url = st.text_input("Enter a YouTube URL or local video path")
 target_name = st.text_input("Enter target name (person or entity)")
 run_btn = st.button("Run Analysis")
 
+if run_btn and transcript_input and target_name:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
+    base_filename = f"{safe_name}_{timestamp}"
+    output_dir = Path(Config.DEFAULT_OUTPUT_DIR)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = uploaded_file
+    transcript_path = output_dir / f"{base_filename}_transcript.txt"
+    report_path = output_dir / f"{base_filename}_report.html"
+    
+    # Highlights
+    with st.spinner("Writing Highlights..."):
+        try:
+            bullets = extract_raw_bullet_data_from_text(transcript_input, target_name, metadata, OPENAI_API_KEY)
+        except Exception as e:
+            bullets = []
+            st.warning("Bullet extraction failed.")
+            
+    # Report
+    with st.spinner("Formatting Tracking Report..."):
+        try:
+            html = generate_html_report(metadata, bullets, transcript, target_name)
+            save_text_file(html, report_path)
+        except Exception as e:
+            st.error(f"Failed to generate report: {e}")
+            st.stop()
+
+    # Output
+    st.success("✅ Analysis complete!")
+    st.download_button("📄 Download HTML Report", html, file_name=report_path.name)
+    st.markdown(html, unsafe_allow_html=True)
+
+
+
 if run_btn and uploaded_file and target_name:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
