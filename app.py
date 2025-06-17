@@ -18,9 +18,12 @@ st.title("TrackGPT: Produce a Tracking Report")
 # Restart button
 if "processing_done" not in st.session_state:
     st.session_state["processing_done"] = False
-
 if st.button("🔄 Start Over"):
     st.session_state.clear()
+    transcript_input = False
+    uploaded_file = False
+    video_url = False
+    target_name = False
 
 # Set up API keys
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]  # Access the API key
