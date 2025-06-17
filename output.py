@@ -603,7 +603,7 @@ def generate_html_report_bullets (
              html_parts.append(f"<p><b>{safe_headline}</b> \"{safe_body}\" {citation}</p>")
              html_parts.append("</div>")
     else:
-        html_parts.append("<p>No relevant bullets were extracted.</p>")
+        html_parts.append("<p>No relevant bullets were extracted. Using Highlights</p>")
     html_parts.append("</div>") # Close bullets-container
 
     # --- Full Transcript Section ---
