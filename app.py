@@ -177,6 +177,7 @@ elif run_btn and video_url and target_name:
         try:
             type = "format_text_highlight_prompt"
             bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY, type)
+            st.write(bullets)
         except Exception as e:
             bullets = []
             st.warning("Bullet extraction failed.")
