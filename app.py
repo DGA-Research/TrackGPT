@@ -37,7 +37,7 @@ if run_btn and video_url and target_name:
         transcript_path = output_dir / f"{base_filename}_transcript.txt"
         report_path = output_dir / f"{base_filename}_report.html"
 
-        with st.spinner("Downloading...")
+        with st.spinner("Downloading..."):
             # Download
             try:
                 audio_str, metadata = download_audio(video_url, output_dir, base_filename)
