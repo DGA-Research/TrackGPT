@@ -30,7 +30,7 @@ video_url = st.text_input("Enter a YouTube URL or local video path")
 target_name = st.text_input("Enter target name (person or entity)")
 run_btn = st.button("Run Analysis")
 
-elif run_btn and transcript_input and target_name:
+if run_btn and transcript_input and target_name:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
     base_filename = f"{safe_name}_{timestamp}"
@@ -120,7 +120,7 @@ elif run_btn and uploaded_file and target_name:
     st.download_button("📄 Download HTML Report", html, file_name=report_path.name)
     st.markdown(html, unsafe_allow_html=True)
 
-if run_btn and video_url and target_name:
+elif run_btn and video_url and target_name:
     with st.spinner("Processing..."):
 
         # Setup
