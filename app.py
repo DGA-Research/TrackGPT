@@ -15,6 +15,13 @@ from output import generate_html_report, save_text_file
 st.set_page_config(page_title="TrackGPT", layout="centered")
 st.title("TrackGPT: Produce a Tracking Report")
 
+# Restart button
+if "processing_done" not in st.session_state:
+    st.session_state["processing_done"] = False
+
+if st.button("🔄 Start Over"):
+    st.session_state.clear()
+
 # Set up API keys
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]  # Access the API key
 ASSEMBLYAI_API_KEY = st.secrets["ASSEMBLYAI_API_KEY"]  # Access the API key
