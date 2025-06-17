@@ -66,14 +66,14 @@ if run_btn and video_url and target_name:
                 bullets = []
                 st.warning("Bullet extraction failed.")
 
-        with st.spinner("Formatting Tracking Report...")
-        # Report
-        try:
-            html = generate_html_report(metadata, bullets, transcript, target_name)
-            save_text_file(html, report_path)
-        except Exception as e:
-            st.error(f"Failed to generate report: {e}")
-            st.stop()
+        with st.spinner("Formatting Tracking Report..."):
+            # Report
+            try:
+                html = generate_html_report(metadata, bullets, transcript, target_name)
+                save_text_file(html, report_path)
+            except Exception as e:
+                st.error(f"Failed to generate report: {e}")
+                st.stop()
 
         # Output
         st.success("✅ Analysis complete!")
