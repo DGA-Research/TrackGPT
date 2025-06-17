@@ -40,7 +40,7 @@ if run_btn and uploaded_file and target_name:
     transcript_path = output_dir / f"{base_filename}_transcript.txt"
     report_path = output_dir / f"{base_filename}_report.html"
 
-    video_metadata = {
+    metadata = {
                     'title': f"Existing file: {audio_path.name}",
                     'uploader': "Unknown (Download Skipped)",
                     'upload_date': None,
