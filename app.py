@@ -177,11 +177,27 @@ elif run_btn and video_url and target_name:
 
     # Output
     st.success("✅ Analysis complete!")
-    st.download_button("📄 Download HTML Report", html, audio_path=report_path.name)
+    # HTML Report download
     st.download_button(
-            label="Download MP3 File",
+        "📄 Download HTML Report",
+        data=html,
+        file_name=report_path.name,
+        mime="text/html"
+    )
+
+    # MP3 download
+    try:
+        with open(audio_path, "rb") as f:
+            mp3_bytes = f.read()
+        st.download_button(
+            "🎵 Download MP3 File",
             data=mp3_bytes,
-            file_name=mp3_path.name,
+            file_name=audio_path.name,
             mime="audio/mpeg"
         )
+    except Exception as e:
+        st.warning(f"Could not prepare MP3 download: {e}")
+
+    # Inline HTML display
+    st.markdown(html, unsafe_allow_html=True)
     st.markdown(html, unsafe_allow_html=True)
