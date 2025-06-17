@@ -268,7 +268,7 @@ elif run_bullets and video_url and target_name:
     with st.spinner("Formatting Tracking Report..."):
         # Report
         try:
-            html = generate_html_report(metadata, bullets, transcript, target_name)
+            html = generate_html_report_bullets(metadata, bullets, transcript, target_name)
             save_text_file(html, report_path)
         except Exception as e:
                 st.error(f"Failed to generate report: {e}")
