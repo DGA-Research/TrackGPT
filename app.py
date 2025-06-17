@@ -178,6 +178,21 @@ elif run_btn and video_url and target_name:
     # Output
     st.success("✅ Analysis complete!")
 
+    # Download buttons
+    st.download_button(
+        "📄 Download HTML Report",
+        data=st.session_state["html_report"],
+        file_name=report_path.name,
+        mime="text/html"
+    )
+
+    st.download_button(
+        "🎵 Download MP3 File",
+        data=st.session_state["mp3_data"],
+        file_name=audio_path.name,
+        mime="audio/mpeg"
+        )
+
     # Save HTML and MP3 to session state to survive re-runs
     st.session_state["html_report"] = html
     try:
@@ -191,18 +206,4 @@ elif run_btn and video_url and target_name:
     # Show HTML report before any buttons (so it doesn’t disappear)
     st.markdown(st.session_state["html_report"], unsafe_allow_html=True)
 
-    # Download buttons (after rendering the report)
-    st.download_button(
-        "📄 Download HTML Report",
-        data=st.session_state["html_report"],
-        file_name=report_path.name,
-        mime="text/html"
-    )
 
-    if st.session_state["mp3_data"]:
-        st.download_button(
-            "🎵 Download MP3 File",
-            data=st.session_state["mp3_data"],
-            file_name=audio_path.name,
-            mime="audio/mpeg"
-        )
