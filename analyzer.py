@@ -227,7 +227,7 @@ def extract_raw_bullet_data_from_text(
                 transcript_text, target_name, metadata, max_bullets
             )
         elif prompt_type == "format_text_highlight_prompt":
-            prompt = format_highlight_bullet_prompt(
+            prompt = format_text_highlight_prompt(
                 transcript_text, target_name, metadata, max_bullets
             )
 
