@@ -13,6 +13,7 @@ import json
 from typing import Optional, List, Dict, Any
 from config import Config
 from prompts import format_text_bullet_prompt
+from prompts import format_text_highlight_prompt
 
 # --- Dependency Checks ---
 try:
@@ -179,6 +180,7 @@ def extract_raw_bullet_data_from_text(
     metadata: Dict[str, Any],
     open_ai_api,
     max_bullets: int = 15,
+    prompt_type
 ) -> List[Dict[str, Optional[str]]]:
     """
     Extracts structured bullet points from a transcript using the OpenAI API.
@@ -197,6 +199,9 @@ def extract_raw_bullet_data_from_text(
                   This metadata is used to provide context to the LLM and
                   potentially populate source/date fields in the extracted bullets.
         max_bullets: The maximum number of bullet points to attempt to extract.
+        prompt_type: Either highlight or bullet prompt:
+            two options:
+            format_text_bullet_prompt OR format_text_highlight_prompt
 
     Returns:
         A list of dictionaries, where each dictionary represents a raw bullet
@@ -217,7 +222,7 @@ def extract_raw_bullet_data_from_text(
     try:
         client = OpenAI(api_key=open_ai_api)
         # Format the prompt for bullet extraction
-        prompt = format_text_bullet_prompt(
+        prompt = prompts_type(
             transcript_text, target_name, metadata, max_bullets
         )
 
