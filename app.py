@@ -13,7 +13,7 @@ from output import generate_html_report, save_text_file
 
 # UI layout
 st.set_page_config(page_title="TrackGPT", layout="centered")
-st.title("🎧 TrackGPT: Video Transcriber & Analyzer")
+st.title("TrackGPT: Produce a Tracking Report")
 
 # Set up API keys
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]  # Access the API key
