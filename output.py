@@ -411,7 +411,7 @@ def generate_html_report(
     return "\n".join(html_parts)
 
 
-def generate_html_report_bullets (
+def generate_html_report_bullets(
     metadata: Dict[str, Any],
     extracted_bullets_raw: List[Dict[str, Optional[str]]],
     transcript_text: str,
