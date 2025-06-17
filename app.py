@@ -37,32 +37,36 @@ if run_btn and video_url and target_name:
         transcript_path = output_dir / f"{base_filename}_transcript.txt"
         report_path = output_dir / f"{base_filename}_report.html"
 
-        # Download
-        try:
-            audio_str, metadata = download_audio(video_url, output_dir, base_filename)
-        except Exception as e:
-            st.error(f"Download failed: {e}")
-            st.stop()
+        with st.spinner("Downloading...")
+            # Download
+            try:
+                audio_str, metadata = download_audio(video_url, output_dir, base_filename)
+            except Exception as e:
+                st.error(f"Download failed: {e}")
+                st.stop()
 
-        # Transcribe
-        try:
-            transcript = transcribe_file(audio_str, OPENAI_API_KEY, ASSEMBLYAI_API_KEY)
-            save_text_file(transcript, transcript_path)
-        except Exception as e:
-            st.error(f"Transcription failed: {e}")
-            st.stop()
+        with st.spinner("Transcribing..."):
+            # Transcribe
+            try:
+                transcript = transcribe_file(audio_str, OPENAI_API_KEY, ASSEMBLYAI_API_KEY)
+                save_text_file(transcript, transcript_path)
+            except Exception as e:
+                st.error(f"Transcription failed: {e}")
+                st.stop()
 
-        # Format transcript for HTML
-        transcript = re.sub(r'(\[\d+:\d+:\d+\.\d+\] Speaker [A-Z])', r'</p><p>\1', transcript)
-        transcript = '<p>' + transcript.strip() + '</p>'
+            # Format transcript for HTML
+            transcript = re.sub(r'(\[\d+:\d+:\d+\.\d+\] Speaker [A-Z])', r'</p><p>\1', transcript)
+            transcript = '<p>' + transcript.strip() + '</p>'
 
-        # Analyze
-        try:
-            bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY)
-        except Exception as e:
-            bullets = []
-            st.warning("Bullet extraction failed.")
+        with st.spinner("Writing Highlights..."):
+            # Analyze
+            try:
+                bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY)
+            except Exception as e:
+                bullets = []
+                st.warning("Bullet extraction failed.")
 
+        with st.spinner("Formatting Tracking Report...")
         # Report
         try:
             html = generate_html_report(metadata, bullets, transcript, target_name)
