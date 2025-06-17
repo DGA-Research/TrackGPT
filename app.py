@@ -13,9 +13,9 @@ from output import generate_html_report, save_text_file
 
 # UI layout
 st.set_page_config(page_title="TrackGPT", layout="centered")
-st.title("TrackGPT: Download, Transcribe, Highlight, and Produce Tracking Report")
+st.title("TrackGPT: Tracking Report Tool")
 url = "https://docs.google.com/document/d/1SR45h_w20Vn1-KrCRfAfkf2E2-aDvH-mXu8S2eA4630/edit?usp=sharing"
-st.markdown("📄 Questions: Check out the [TrackGPT Instructions](%s)" % url)
+st.markdown("Questions? Check out the [📄 TrackGPT Instructions](%s)" % url)
 
 # Restart button
 if "processing_done" not in st.session_state:
