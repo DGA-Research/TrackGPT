@@ -36,7 +36,6 @@ if run_btn and transcript_input and target_name:
     base_filename = f"{safe_name}_{timestamp}"
     output_dir = Path(Config.DEFAULT_OUTPUT_DIR)
     output_dir.mkdir(parents=True, exist_ok=True)
-    audio_path = uploaded_file
     transcript_path = output_dir / f"{base_filename}_transcript.txt"
     report_path = output_dir / f"{base_filename}_report.html"
     
