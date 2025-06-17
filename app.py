@@ -52,7 +52,7 @@ if download_button and target_name:
     # Highlights
     with st.spinner("Writing Highlights..."):
         try:
-            bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY)
+            bullets = extract_raw_bullet_data_from_text(transcript, target_name, OPENAI_API_KEY)
         except Exception as e:
             bullets = []
             st.warning("Bullet extraction failed.")
@@ -60,7 +60,7 @@ if download_button and target_name:
     # Report
     with st.spinner("Formatting Tracking Report..."):
         try:
-            html = generate_html_report(metadata, bullets, transcript, target_name)
+            html = generate_html_report(bullets, transcript, target_name)
             save_text_file(html, report_path)
         except Exception as e:
             st.error(f"Failed to generate report: {e}")
