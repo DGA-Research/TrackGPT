@@ -40,7 +40,7 @@ if run_btn and transcript_input and target_name:
     report_path = output_dir / f"{base_filename}_report.html"
 
     metadata = {
-                    'title': f"Existing file: {audio_path.name}",
+                    'title': f"Existing file:",
                     'uploader': "Unknown (Download Skipped)",
                     'upload_date': None,
                     'webpage_url': "N/A",
