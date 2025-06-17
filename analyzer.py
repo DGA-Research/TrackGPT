@@ -222,11 +222,11 @@ def extract_raw_bullet_data_from_text(
     try:
         client = OpenAI(api_key=open_ai_api)
         # Format the prompt for bullet extraction
-        if prompts_type == "format_text_bullet_prompt":
+        if prompt_type == "format_text_bullet_prompt":
             prompt = format_text_bullet_prompt(
                 transcript_text, target_name, metadata, max_bullets
             )
-        elif prompts_type == "format_text_highlight_prompt":
+        elif prompt_type == "format_text_highlight_prompt":
             prompt = format_highlight_bullet_prompt(
                 transcript_text, target_name, metadata, max_bullets
             )
