@@ -54,7 +54,7 @@ TEXT_HIGHLIGHT_PROMPT_TEMPLATE = """# ROLE: Meticulous Communications Analyst & 
 # Begin Extraction:
 """
 
-def format_text_hight_prompt(
+def format_text_highlight_prompt(
     transcript_text: str,
     target_name: str,
     metadata: Dict[str, Any],
