@@ -282,14 +282,14 @@ def extract_raw_bullet_data_from_text(
                 part = part.strip()
                 if part.startswith("**Headline:**"):
                     bullet_data['headline_raw'] = part[len("**Headline:**"):].strip()
-                # elif part.startswith("**Speaker:**"):
-                    # bullet_data['speaker_raw'] = part[len("**Speaker:**"):].strip()
-                # elif part.startswith("**Body:**"):
-                    # bullet_data['body_raw'] = part[len("**Body:**"):].strip()
-                # elif part.startswith("**Source:**"):
-                    # bullet_data['source_raw'] = part[len("**Source:**"):].strip()
-                # elif part.startswith("**Date:**"):
-                    # bullet_data['date_raw'] = part[len("**Date:**"):].strip()
+                elif part.startswith("**Speaker:**"):
+                    bullet_data['speaker_raw'] = part[len("**Speaker:**"):].strip()
+                elif part.startswith("**Body:**"):
+                    bullet_data['body_raw'] = part[len("**Body:**"):].strip()
+                elif part.startswith("**Source:**"):
+                    bullet_data['source_raw'] = part[len("**Source:**"):].strip()
+                elif part.startswith("**Date:**"):
+                    bullet_data['date_raw'] = part[len("**Date:**"):].strip()
 
             # Basic validation: check if essential parts (headline, body, speaker) were found
             # Source and date are optional and might be missing.
