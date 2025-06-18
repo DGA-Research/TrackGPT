@@ -79,7 +79,9 @@ if ((run_highlights or run_bullets) and (transcript_input or not transcript_butt
         # if user uploaded a file, download it and set it to the audio path
         elif uploaded_file:
             audio_str = uploaded_file
-            audio_path = uploaded_file 
+            audio_path = uploaded_file
+        else:
+            audio_path = none
 
     # Transcribe Step
     with st.spinner("Transcribing..."):
@@ -166,7 +168,7 @@ if ((run_highlights or run_bullets) and (transcript_input or not transcript_butt
         mime="text/html"
     )
 
-    if not uploaded_file:
+    if video_url:
         st.download_button(
             "🎵 Download MP3 File",
             data=st.session_state["mp3_data"],
