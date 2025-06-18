@@ -65,6 +65,7 @@ if (run_highlights or run_bullets) and (transcript_input or not transcript_butto
         if not download_button:
             try:
                 audio_str, metadata = download_audio(video_url, output_dir, base_filename)
+                audio_path = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
             except Exception as e:
                     st.error(f"Download failed: {e}")
                     if st.button("🔄 Start Over: Invalid Link. Try Again or Upload File as MP3"):
@@ -73,6 +74,7 @@ if (run_highlights or run_bullets) and (transcript_input or not transcript_butto
         # if user uploaded a file, download it and set it to the audio path
         elif uploaded_file:
             audio_str = uploaded_file
+            audio_path = uploaded_file 
 
     # Transcribe Step
     with st.spinner("Transcribing..."):
