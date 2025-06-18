@@ -47,7 +47,7 @@ run_highlights = st.button("Generate Tracking Report with Highlights")
 run_bullets = st.button("Generate Tracking Report with Bullets")
 
 
-if ((run_highlights or run_bullets) and (transcript_input or not transcript_button) and (uploaded_file or video_url)):
+if ((run_highlights or run_bullets) and (transcript_input or not transcript_button) and (uploaded_file or video_url or transcript)):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
     base_filename = f"{safe_name}_{timestamp}"
@@ -66,8 +66,8 @@ if ((run_highlights or run_bullets) and (transcript_input or not transcript_butt
     
     # Download Step
     with st.spinner("Downloading..."):
-        # download if user do not upload their own file
-        if not download_button:
+        # download if user entered a url
+        if video_url:
             try:
                 audio_str, metadata = download_audio(video_url, output_dir, base_filename)
                 audio_path = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
