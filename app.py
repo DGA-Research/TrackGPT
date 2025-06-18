@@ -148,7 +148,7 @@ if ((run_highlights or run_bullets) and (transcript_input or not transcript_butt
 
     # Save HTML and MP3 to session state to survive re-runs
     st.session_state["html_report"] = html
-    if not uploaded_file:
+    if video_url:
         try:
             with open(audio_path, "rb") as f:
                 mp3_bytes = f.read()
