@@ -249,6 +249,7 @@ elif run_bullets and video_url and target_name:
         try:
             transcript = transcribe_file(audio_str, OPENAI_API_KEY, ASSEMBLYAI_API_KEY)
             save_text_file(transcript, transcript_path)
+            st.write("print transcript:", transcript)
         except Exception as e:
             st.error(f"Transcription failed: {e}")
             st.stop()
@@ -262,6 +263,7 @@ elif run_bullets and video_url and target_name:
         type = "format_text_bullet_prompt"
         try:
             bullets = extract_raw_bullet_data_from_text(transcript_input, target_name, metadata, OPENAI_API_KEY, type)
+            st.write("print bullets:", bullets)
         except Exception as e:
             bullets = []
             st.warning("Bullet extraction failed.")
