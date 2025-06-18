@@ -43,6 +43,8 @@ target_name = st.text_input("Target Name*")
 run_highlights = st.button("Generate Tracking Report with Highlights")
 run_bullets = st.button("Generate Tracking Report with Bullets")
 
+st.write("uploaded_file is", uploaded_file)
+
 if (run_highlights or run_bullets) and (transcript_input or not transcript_button) and (uploaded_file or video_url):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
