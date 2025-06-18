@@ -21,7 +21,7 @@ st.markdown("Questions? Check out the [TrackGPT Instructions](%s)" % url)
 # Restart button
 if "processing_done" not in st.session_state:
     st.session_state["processing_done"] = False
-if st.button("🛑 Stop Running"):
+if st.button("🔄 Restart"):
     st.session_state.clear()
 
 # Set up API keys
