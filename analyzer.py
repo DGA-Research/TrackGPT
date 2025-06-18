@@ -293,7 +293,7 @@ def extract_raw_bullet_data_from_text(
 
             # Basic validation: check if essential parts (headline, body, speaker) were found
             # Source and date are optional and might be missing.
-            if headline_raw' in bullet_data and prompt_type == "format_text_highlight_prompt":
+            if 'headline_raw' in bullet_data and prompt_type == "format_text_highlight_prompt":
                 # Append the extracted data as a dictionary to the results list
                 extracted_bullets_raw.append({
                     "headline_raw": bullet_data.get('headline_raw')
