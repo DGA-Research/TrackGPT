@@ -33,8 +33,11 @@ transcript_input = False
 uploaded_file = False
 download_button = st.checkbox("Enter my own mp3 or m4a file")
 if download_button:
-    uploaded_file = st.file_uploader("Upload an mp3 file", type=["mp3"], key="video_file")
-    uploaded_file = st.file_uploader("Upload an m4a file", type=["m4a"], key="video_file2")
+    uploaded_file_mp3 = st.file_uploader("Upload an mp3 file", type=["mp3"], key="video_file")
+    uploaded_file_m4a = st.file_uploader("Upload an m4a file", type=["m4a"], key="video_file2")
+
+    uploaded_file = uploaded_file_mp3 or uploaded_file_m4a
+    
 transcript_button = st.checkbox("Enter my own transcript file")
 if transcript_button:
     transcript_input = st.text_area("Copy and paste transcript here", key="transcript_input")
@@ -43,7 +46,6 @@ target_name = st.text_input("Target Name*")
 run_highlights = st.button("Generate Tracking Report with Highlights")
 run_bullets = st.button("Generate Tracking Report with Bullets")
 
-st.write("uploaded_file is", uploaded_file)
 
 if ((run_highlights or run_bullets) and (transcript_input or not transcript_button) and (uploaded_file or video_url)):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
