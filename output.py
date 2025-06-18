@@ -610,7 +610,8 @@ def generate_html_report_bullets(
     # (Existing transcript logic remains the same)
     html_parts.append("<h2>Full Transcript</h2>")
     safe_transcript = html.escape(transcript_text if transcript_text else "Transcript unavailable.")
-    html_parts.append(f"<div class=\"transcript\">{safe_transcript}</div>")
+    # html_parts.append(f"<div class=\"transcript\">{safe_transcript}</div>")
+    html_parts.append(transcript_text)
 
     # --- Closing HTML ---
     html_parts.append("</div>") # Close research-dossier
