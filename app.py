@@ -44,7 +44,125 @@ run_highlights = st.button("Generate Tracking Report with Highlights")
 run_bullets = st.button("Generate Tracking Report with Bullets")
 
 if (run_highlights or run_bullets) and (transcript_input or not transcript_button) and (uploaded_file or video_url):
-    st.write("THIS WORKED")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
+    base_filename = f"{safe_name}_{timestamp}"
+    output_dir = Path(Config.DEFAULT_OUTPUT_DIR)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    transcript_path = output_dir / f"{base_filename}_transcript.txt"
+    report_path = output_dir / f"{base_filename}_report.html"
+
+    metadata = {
+                    'title': f"Existing file:",
+                    'uploader': "Unknown (Download Skipped)",
+                    'upload_date': None,
+                    'webpage_url': "N/A",
+                    'extractor': "Local file",
+                }
+    # Download Step
+    with st.spinner("Downloading..."):
+        # download if user do not upload their own file
+        if not download_button:
+            try:
+                audio_str, metadata = download_audio(video_url, output_dir, base_filename)
+            except Exception as e:
+                    st.error(f"Download failed: {e}")
+                    if st.button("🔄 Start Over: Invalid Link. Try Again or Upload File as MP3"):
+                        st.session_state.clear()
+                        str.stop()
+        # if user uploaded a file, download it and set it to the audio path
+        elif uploaded_file:
+            audio_str = uploaded_file
+
+    # Transcribe Step
+    with st.spinner("Transcribing..."):
+        # transcribe if user does not upload their own file
+        if not transcript_input:
+            try:
+                transcript = transcribe_file(audio_str, OPENAI_API_KEY, ASSEMBLYAI_API_KEY)
+                save_text_file(transcript, transcript_path)
+            except Exception as e:
+                st.error(f"Transcription failed: {e}")
+                st.stop()
+        # use input transcription
+        elif transcript_input:
+            try:
+                transcript = transcript_input
+                save_text_file(transcript, transcript_path)
+            except Exception as e:
+                st.error(f"Transcription failed: {e}")
+                st.stop()
+
+    # Highlight/Bullet Step
+    if run_highlights:
+        with st.spinner("Writing Highlights..."):
+        # Analyze
+        try:
+            type = "format_text_highlight_prompt"
+            bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY, type)
+        except Exception as e:
+            bullets = []
+            st.warning("Bullet extraction failed.")
+
+        with st.spinner("Formatting Tracking Report..."):
+            # Report
+            try:
+                html = generate_html_report(metadata, bullets, transcript, target_name)
+                save_text_file(html, report_path)
+            except Exception as e:
+                    st.error(f"Failed to generate report: {e}")
+                    st.stop()
+    elif run_bullets:
+        with st.spinner("Writing Bullets..."):
+        # Analyze
+        type = "format_text_bullet_prompt"
+        try:
+            bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY, type)
+        except Exception as e:
+            bullets = []
+            st.warning("Bullet extraction failed.")
+
+        with st.spinner("Formatting Tracking Report..."):
+            # Report
+            try:
+                html = generate_html_report_bullets(metadata, bullets, transcript, target_name)
+                save_text_file(html, report_path)
+            except Exception as e:
+                    st.error(f"Failed to generate report: {e}")
+                    st.stop()
+
+    # Output
+    st.success("✅ Analysis complete!")
+
+    # Save HTML and MP3 to session state to survive re-runs
+    st.session_state["html_report"] = html
+    try:
+        with open(audio_path, "rb") as f:
+            mp3_bytes = f.read()
+        st.session_state["mp3_data"] = mp3_bytes
+    except Exception as e:
+        st.warning(f"Could not prepare MP3 download: {e}")
+        st.session_state["mp3_data"] = None
+
+    # Show HTML report before any buttons (so it doesn’t disappear)
+    st.markdown(st.session_state["html_report"], unsafe_allow_html=True)
+
+    # Download buttons (after rendering the report)
+    st.download_button(
+        "📄 Download HTML Report",
+        data=st.session_state["html_report"],
+        file_name=report_path.name,
+        mime="text/html"
+    )
+
+    if st.session_state["mp3_data"]:
+        st.download_button(
+            "🎵 Download MP3 File",
+            data=st.session_state["mp3_data"],
+            file_name=audio_path.name,
+            mime="audio/mpeg"
+        )
+
 
 elif run_highlights and transcript_input and target_name:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
