@@ -81,7 +81,7 @@ if ((run_highlights or run_bullets) and (transcript_input or not transcript_butt
             audio_str = uploaded_file
             audio_path = uploaded_file
         else:
-            audio_path = none
+            audio_path = "none"
 
     # Transcribe Step
     with st.spinner("Transcribing..."):
