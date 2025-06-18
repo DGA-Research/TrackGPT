@@ -97,12 +97,12 @@ if (run_highlights or run_bullets) and (transcript_input or not transcript_butto
     if run_highlights:
         with st.spinner("Writing Highlights..."):
         # Analyze
-        try:
-            type = "format_text_highlight_prompt"
-            bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY, type)
-        except Exception as e:
-            bullets = []
-            st.warning("Bullet extraction failed.")
+            try:
+                type = "format_text_highlight_prompt"
+                bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY, type)
+            except Exception as e:
+                bullets = []
+                st.warning("Bullet extraction failed.")
 
         with st.spinner("Formatting Tracking Report..."):
             # Report
