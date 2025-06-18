@@ -40,10 +40,13 @@ if transcript_button:
     transcript_input = st.text_area("Copy and paste transcript here", key="transcript_input")
 video_url = st.text_input("Enter a video or audio URL. See [Supported Sources](%s)" % url)
 target_name = st.text_input("Target Name*")
-run_btn = st.button("Generate Tracking Report with Highlights")
+run_highlights = st.button("Generate Tracking Report with Highlights")
 run_bullets = st.button("Generate Tracking Report with Bullets")
 
-if run_btn and transcript_input and target_name:
+if (run_highlights or run_bullets) and (transcript_input or not transcript_button) and (uploaded_file or video_url):
+    st.write("THIS WORKED")
+
+elif run_btn and transcript_input and target_name:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
     base_filename = f"{safe_name}_{timestamp}"
