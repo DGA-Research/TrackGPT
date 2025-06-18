@@ -59,6 +59,7 @@ if (run_highlights or run_bullets) and (transcript_input or not transcript_butto
                     'webpage_url': "N/A",
                     'extractor': "Local file",
                 }
+    
     # Download Step
     with st.spinner("Downloading..."):
         # download if user do not upload their own file
@@ -94,8 +95,11 @@ if (run_highlights or run_bullets) and (transcript_input or not transcript_butto
             except Exception as e:
                 st.error(f"Transcription failed: {e}")
                 st.stop()
+        # Format transcript for HTML
+        transcript = re.sub(r'(\[\d+:\d+:\d+\.\d+\] Speaker [A-Z])', r'</p><p>\1', transcript)
+        transcript = '<p>' + transcript.strip() + '</p>'
 
-    # Highlight/Bullet Step
+    # Highlight/Bullet and Report Step
     if run_highlights:
         with st.spinner("Writing Highlights..."):
         # Analyze
