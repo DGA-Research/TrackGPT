@@ -262,7 +262,7 @@ elif run_bullets and video_url and target_name:
         # Analyze
         type = "format_text_bullet_prompt"
         try:
-            bullets = extract_raw_bullet_data_from_text(transcript_input, target_name, metadata, OPENAI_API_KEY, type)
+            bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY, type)
             st.write("print bullets:", bullets)
         except Exception as e:
             bullets = []
