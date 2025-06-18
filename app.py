@@ -46,7 +46,7 @@ run_bullets = st.button("Generate Tracking Report with Bullets")
 if (run_highlights or run_bullets) and (transcript_input or not transcript_button) and (uploaded_file or video_url):
     st.write("THIS WORKED")
 
-elif run_btn and transcript_input and target_name:
+elif run_highlights and transcript_input and target_name:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
     base_filename = f"{safe_name}_{timestamp}"
@@ -88,7 +88,7 @@ elif run_btn and transcript_input and target_name:
 
 
 
-elif run_btn and uploaded_file and target_name:
+elif run_highlights and uploaded_file and target_name:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
     base_filename = f"{safe_name}_{timestamp}"
@@ -142,7 +142,7 @@ elif run_btn and uploaded_file and target_name:
     st.download_button("📄 Download HTML Report", html, file_name=report_path.name)
     st.markdown(html, unsafe_allow_html=True)
 
-elif run_btn and video_url and target_name:
+elif run_highlights and video_url and target_name:
     # Setup
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
