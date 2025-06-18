@@ -282,18 +282,23 @@ def extract_raw_bullet_data_from_text(
                 part = part.strip()
                 if part.startswith("**Headline:**"):
                     bullet_data['headline_raw'] = part[len("**Headline:**"):].strip()
-                elif part.startswith("**Speaker:**"):
+                elif part.startswith("**Speaker:**") and prompt_type == "format_text_bullet_prompt":
                     bullet_data['speaker_raw'] = part[len("**Speaker:**"):].strip()
-                elif part.startswith("**Body:**"):
+                elif part.startswith("**Body:**") and prompt_type == "format_text_bullet_prompt":
                     bullet_data['body_raw'] = part[len("**Body:**"):].strip()
-                elif part.startswith("**Source:**"):
+                elif part.startswith("**Source:**") and prompt_type == "format_text_bullet_prompt":
                     bullet_data['source_raw'] = part[len("**Source:**"):].strip()
-                elif part.startswith("**Date:**"):
+                elif part.startswith("**Date:**") and prompt_type == "format_text_bullet_prompt":
                     bullet_data['date_raw'] = part[len("**Date:**"):].strip()
 
             # Basic validation: check if essential parts (headline, body, speaker) were found
             # Source and date are optional and might be missing.
-            if 'headline_raw' in bullet_data:
+            if headline_raw' in bullet_data and prompt_type == "format_text_highlight_prompt":
+                # Append the extracted data as a dictionary to the results list
+                extracted_bullets_raw.append({
+                    "headline_raw": bullet_data.get('headline_raw')
+                })
+            elif 'headline_raw' in bullet_data and prompt_type == "format_text_bullet_prompt":
                 # Append the extracted data as a dictionary to the results list
                 extracted_bullets_raw.append({
                     "headline_raw": bullet_data.get('headline_raw'),
