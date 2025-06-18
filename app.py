@@ -165,7 +165,7 @@ if ((run_highlights or run_bullets) and (transcript_input or not transcript_butt
         mime="text/html"
     )
 
-    if st.session_state["mp3_data"]:
+    if not uploaded_file:
         st.download_button(
             "🎵 Download MP3 File",
             data=st.session_state["mp3_data"],
