@@ -40,7 +40,6 @@ if download_button:
     uploaded_file_mp4 = st.file_uploader("Upload an mp4 file", type=["mp4"], key="video_file3")
     # enter date
     date_input = st.text_input("Enter upload date: (MM/DD/YYYY)")
-    type_input = st.text_input("Enter file type (VIDEO or AUDIO):")
 
     uploaded_file = uploaded_file_mp3 or uploaded_file_m4a or uploaded_file_mp4
     
@@ -48,6 +47,7 @@ transcript_button = st.checkbox("Enter my own transcript file")
 if transcript_button:
     transcript_input = st.text_area("Copy and paste transcript here", key="transcript_input")
 video_url = st.text_input("Enter a video or audio URL. See [Supported Sources](%s)" % url)
+type_input = st.text_input("Enter file type (VIDEO or AUDIO)*")
 target_name = st.text_input("Target Name*")
 run_highlights = st.button("Generate Tracking Report with Highlights")
 run_bullets = st.button("Generate Tracking Report with Bullets")
