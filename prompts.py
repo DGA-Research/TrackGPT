@@ -134,7 +134,7 @@ TEXT_BULLET_PROMPT_TEMPLATE = """# ROLE: Meticulous Communications Analyst & Inf
 #     *   **Be Descriptive & Significant:** Make the summary informative. Capture the *essence* of the point. GOOD: `Interviewer Claimed {target_name}'s New Policy Would Impact Farmers.` BAD: `Interviewer Talked About Policy.`
 #     *   **Optional Short Quote Snippet:** You MAY include a *very short* (under 10 words), impactful, verbatim quote snippet in double quotes within the summary *if* it *is* the core point AND is directly spoken by the actor named in the headline (e.g., `{target_name} Described New Project As "Revolutionary".`). Use sparingly, especially for third-party claims.
 #     *   **Final Format:** Ensure the entire headline ends with a single period. Output as plain text. **DO NOT apply special capitalization (like Title Case) here.**
-# 6. **Time Stamp (Per Bullet):** Using the time stamps on the input transcript, identify an estimate starting time stamp at which the statement was said. Don't change how you would select bullets or section them off. Ex: [0:00:06.88]
+# 6. **Time Stamp (Per Bullet):** Add the time stamp of the paragraph that the excerpt is apart of. Ex: [0:00:06.88]
 # 7. **Limit:** Extract up to **{max_bullets}** distinct factual points. Prioritize statements with potential PR implications or significant informational value, including both self-stated points and claims made *about* the target.
 # 8.  **Empty Result:** If no relevant points are found, output only the text "@@NO BULLETS FOUND@@".
 
