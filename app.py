@@ -36,6 +36,8 @@ if download_button:
     uploaded_file_mp3 = st.file_uploader("Upload an mp3 file", type=["mp3"], key="video_file")
     uploaded_file_m4a = st.file_uploader("Upload an m4a file", type=["m4a"], key="video_file2")
     uploaded_file_mp4 = st.file_uploader("Upload an mp4 file", type=["mp4"], key="video_file3")
+    # enter date
+    date_input = st.text_input("Enter the date of the recording: (MM/DD/YYYY)")
 
     uploaded_file = uploaded_file_mp3 or uploaded_file_m4a or uploaded_file_mp4
     
@@ -60,7 +62,7 @@ if ((run_highlights or run_bullets) and (transcript_input or not transcript_butt
     metadata = {
                     'title': f"Existing file:",
                     'uploader': "Unknown (Download Skipped)",
-                    'upload_date': None,
+                    'upload_date': date_input,
                     'webpage_url': "N/A",
                     'extractor': "Local file",
                 }
