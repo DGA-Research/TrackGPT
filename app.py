@@ -66,7 +66,7 @@ if ((run_highlights or run_bullets) and (transcript_input or not transcript_butt
                     'upload_date': date_input,
                     'webpage_url': "N/A",
                     'extractor': "Local file",
-                    'file_type': type_input
+                    'type_input': type_input
                 }
     
     # Download Step
