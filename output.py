@@ -471,6 +471,7 @@ def generate_html_report_bullets(
     uploader = metadata.get('uploader', '').strip()
     extractor = metadata.get('extractor', '').strip()
     source_context = "Unknown Source" # Default fallback
+    print("Does print work at all?")
 
     # Get video type
     type_input = metadata.get('type_input', '').capitalize()
