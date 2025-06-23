@@ -35,8 +35,9 @@ download_button = st.checkbox("Enter my own mp3 or m4a file")
 if download_button:
     uploaded_file_mp3 = st.file_uploader("Upload an mp3 file", type=["mp3"], key="video_file")
     uploaded_file_m4a = st.file_uploader("Upload an m4a file", type=["m4a"], key="video_file2")
+    uploaded_file_mp4 = st.file_uploader("Upload an mp4 file", type=["mp4"], key="video_file3")
 
-    uploaded_file = uploaded_file_mp3 or uploaded_file_m4a
+    uploaded_file = uploaded_file_mp3 or uploaded_file_m4a or uploaded_file_mp4
     
 transcript_button = st.checkbox("Enter my own transcript file")
 if transcript_button:
