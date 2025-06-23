@@ -62,7 +62,7 @@ if not FFMPEG_PATH:
     sys.exit(1) # Exit if ffmpeg is not found
 
 # --- Core Function ---
-def download_audio(url: str, output_dir: Path, base_filename: str) -> Optional[Tuple[str, Dict[str, Any]]]:
+def download_audio(url: str, output_dir: Path, base_filename: str, input_type) -> Optional[Tuple[str, Dict[str, Any]]]:
     """
     Downloads audio from a given URL using the yt-dlp command-line tool.
 
@@ -123,6 +123,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str) -> Optional[T
                 'webpage_url': info_dict.get('webpage_url', url),  # Use canonical URL if available, else original URL
                 'duration': info_dict.get('duration'), # Duration in seconds or None
                 'extractor': info_dict.get('extractor_key', info_dict.get('extractor', 'unknown')), # Platform identifier
+                'input_type': input_type,
                 # Include additional potentially useful fields
                 'view_count': info_dict.get('view_count'),
                 'thumbnail': info_dict.get('thumbnail'),
