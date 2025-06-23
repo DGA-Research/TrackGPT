@@ -76,7 +76,7 @@ if ((run_highlights or run_bullets) and (transcript_input or not transcript_butt
         # download if user entered a url
         if video_url:
             try:
-                audio_str, metadata = download_audio(video_url, output_dir, base_filename)
+                audio_str, metadata = download_audio(video_url, output_dir, base_filename, type_input)
                 audio_path = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
             except Exception as e:
                     st.error(f"Download failed: {e}")
