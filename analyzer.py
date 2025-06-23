@@ -307,7 +307,7 @@ def extract_raw_bullet_data_from_text(
                     "speaker_raw": bullet_data.get('speaker_raw'),
                     "body_raw": bullet_data.get('body_raw'),
                     "source_raw": bullet_data.get('source_raw'), # Will be None if not found
-                    "date_raw": bullet_data.get('date_raw')      # Will be None if not found
+                    "date_raw": bullet_data.get('date_raw'),      # Will be None if not found
                     "time_raw": bullet_data.get('time_raw')
                 })
             else:
