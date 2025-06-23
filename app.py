@@ -109,12 +109,8 @@ if ((run_highlights or run_bullets) and (transcript_input or not transcript_butt
                 st.error(f"Transcription failed: {e}")
                 st.stop()
         # Format transcript for HTML
-        transcript = re.sub(
-            r'\[(\d+:\d+:\d+\.\d+)\] Speaker ([A-Za-z ]+):',
-            lambda m: f'<p><b>[{m.group(1)}] SPEAKER {m.group(2).upper()}</b>:',
-            transcript
-        )
-        transcript += '</p>'
+        transcript = re.sub(r'(\[\d+:\d+:\d+\.\d+\] Speaker [A-Z])', r'</p><p>\1', transcript)
+        transcript = '<p><b>' + transcript.strip() + '</b></p>'
         
     # Highlight/Bullet and Report Step
     if run_highlights:
