@@ -473,7 +473,7 @@ def generate_html_report_bullets(
     source_context = "Unknown Source" # Default fallback
 
     # Get video type
-    type_input = metadata.get('type_input', 'TEST')
+    type_input = metadata.get('type_input', '').strip()
     print(type_input)
 
     if uploader and uploader.lower() not in ['unknown uploader', 'n/a', '']:
