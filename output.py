@@ -474,7 +474,7 @@ def generate_html_report_bullets(
 
     # Get video type
     type_input = metadata.get('type_input', '').strip()
-    type_input = type_input.capitalize()
+    type_input = type_input.upper()
 
     if uploader and uploader.lower() not in ['unknown uploader', 'n/a', '']:
         source_context = uploader
