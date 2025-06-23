@@ -47,7 +47,7 @@ transcript_button = st.checkbox("Enter my own transcript file")
 if transcript_button:
     transcript_input = st.text_area("Copy and paste transcript here", key="transcript_input")
 video_url = st.text_input("Enter a video or audio URL. See [Supported Sources](%s)" % url)
-type_input = st.text_input("Enter file type (VIDEO or AUDIO)*")
+type_input = st.text_input("Enter file type (VIDEO or AUDIO):")
 target_name = st.text_input("Target Name*")
 run_highlights = st.button("Generate Tracking Report with Highlights")
 run_bullets = st.button("Generate Tracking Report with Bullets")
