@@ -6,29 +6,27 @@ import re
 import hmac
 
 def check_password():
-    """Returns `True` if the user had the correct password."""
-
-    def password_entered():
-        """Checks whether a password entered by the user is correct."""
-        if hmac.compare_digest(st.session_state["password"], st.secrets["password"]):
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
+    """Returns `True` if the user entered the correct password."""
 
     if st.session_state.get("password_correct", False):
         return True
 
     with st.form("password_form"):
-        st.text_input(
-            "Password", type="password", on_change=password_entered, key="password"
-        )
-        st.form_submit_button("Enter")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Enter")
+        if submitted:
+            if hmac.compare_digest(password, st.secrets["password"]):
+                st.session_state["password_correct"] = True
+                return True
+            else:
+                st.session_state["password_correct"] = False
 
-    if "password_correct" in st.session_state:
+    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
         st.error("😕 Password incorrect")
+
     return False
 
+# Now use it like this
 if check_password():
     # Import your existing modules directly (no argparse)
     from config import Config
