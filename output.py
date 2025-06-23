@@ -540,6 +540,8 @@ def generate_html_report_bullets(
     html_parts.append(f"<p><strong>Uploader/Channel:</strong> {html.escape(metadata.get('uploader', 'N/A'))}</p>")
     html_parts.append(f"<p><strong>Upload Date:</strong> {display_date}</p>")
     html_parts.append(f"<p><strong>Platform:</strong> {html.escape(metadata.get('extractor', 'N/A'))}</p>")
+    html_parts.append(f"<p><strong>File Type:</strong> {type_input}</p>")
+    
     url = metadata.get('webpage_url', '#')
     html_parts.append(f"<p><strong>URL:</strong> <a href=\"{html.escape(url)}\" target=\"_blank\">{html.escape(url)}</a></p>")
     duration_sec = metadata.get('duration')
