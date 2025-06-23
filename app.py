@@ -110,12 +110,12 @@ if ((run_highlights or run_bullets) and (transcript_input or not transcript_butt
                 st.stop()
         # Format transcript for HTML
         transcript = re.sub(
-            r'\[(\d+:\d+:\d+\.\d+)\] Speaker ([A-Za-z]+)',
-            r'</p><p><b>[\1] SPEAKER \2</b>',
+            r'\[(\d+:\d+:\d+\.\d+)\] Speaker ([A-Za-z]+):',
+            lambda m: f'</p><p><b>[{m.group(1)}] SPEAKER {m.group(2).upper()}</b>:',
             transcript
-            )
+        )
         transcript = '<p>' + transcript.strip() + '</p>'
-
+        
     # Highlight/Bullet and Report Step
     if run_highlights:
         with st.spinner("Writing Highlights..."):
