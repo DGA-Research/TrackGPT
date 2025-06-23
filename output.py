@@ -597,7 +597,7 @@ def generate_html_report_bullets(
                   citation = f'[{safe_source}, <a href="{safe_url}" target="_blank" rel="noopener noreferrer"><em>{safe_link_text}</em></a>] ({type_input}) ({time})'
              else:
                   # Use already escaped components
-                  citation = f'[{safe_source}, {safe_formatted_date_mdy}] (({type_input}) ({time})'
+                  citation = f'[{safe_source}, {safe_formatted_date_mdy}] (({type_input}) {time}'
 
              # Escape the main headline and body text
              # Apply strict title case to the headline before escaping
