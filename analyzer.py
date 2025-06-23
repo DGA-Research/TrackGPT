@@ -290,6 +290,8 @@ def extract_raw_bullet_data_from_text(
                     bullet_data['source_raw'] = part[len("**Source:**"):].strip()
                 elif part.startswith("**Date:**") and prompt_type == "format_text_bullet_prompt":
                     bullet_data['date_raw'] = part[len("**Date:**"):].strip()
+                elif part.startswith("**Time:**") and prompt_type == "format_text_bullet_prompt":
+                    bullet_data['time_raw'] = part[len("**Time:**"):].strip()
 
             # Basic validation: check if essential parts (headline, body, speaker) were found
             # Source and date are optional and might be missing.
@@ -306,6 +308,7 @@ def extract_raw_bullet_data_from_text(
                     "body_raw": bullet_data.get('body_raw'),
                     "source_raw": bullet_data.get('source_raw'), # Will be None if not found
                     "date_raw": bullet_data.get('date_raw')      # Will be None if not found
+                    "time_raw": bullet_data.get('time_raw')
                 })
             else:
                 # Log a warning if a block could not be fully parsed
