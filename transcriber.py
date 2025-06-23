@@ -19,6 +19,10 @@ from config import Config
 
 logger = logging.getLogger(__name__)
 
+# Set up bold
+BOLD = '\033[1m'
+END = '\033[0m'
+
 # Constants
 CHUNK_SIZE_LIMIT = 24 * 1024 * 1024  # 24 MB
 DEFAULT_OVERLAP_SECONDS = 2
@@ -46,7 +50,8 @@ def transcribe_file(audio_file_path, openai_key, assemblyai_key):
     for utterance in transcript.utterances:
         timestamp = format_timestamp(utterance.start)
         # print((f"[{timestamp}] Speaker {utterance.speaker}: {utterance.text}"))
-        lines.append(f"[{timestamp}] Speaker {utterance.speaker}: {utterance.text}")
+        lines.append(f"{BOLD}[{timestamp}] Speaker {utterance.speaker}{END}: {utterance.text}")
+
     lines1 = "\n".join(lines)
     print("lines1", lines1)
 
