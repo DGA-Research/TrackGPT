@@ -109,12 +109,21 @@ if ((run_highlights or run_bullets) and (transcript_input or not transcript_butt
                 st.error(f"Transcription failed: {e}")
                 st.stop()
         # Format transcript for HTML
-        transcript = re.sub(
-            r'\[(\d+:\d+:\d+\.\d+)\] Speaker ([A-Za-z]+):',
-            r'</p><p><b>[\1] SPEAKER \2</b>:',
-            transcript
-        )
-        transcript = '<p>' + transcript.strip() + '</p>'
+        # Split transcript into lines (assuming each speaker starts with timestamp)
+        lines = re.split(r'(\[\d+:\d+:\d+\.\d+\] Speaker [A-Za-z] \(.*?\):)', transcript)
+        
+        result = []
+        # The split keeps timestamps as separate elements, so iterate in pairs
+        for i in range(1, len(lines), 2):
+            speaker = lines[i]
+            text = lines[i+1] if i+1 < len(lines) else ''
+        
+            # Make just the timestamp + speaker bold, keep the rest normal
+            bolded_speaker = re.sub(
+                r'(\[\d+:\d+:\d+\.\d+\]) (Speaker [A-Za-z] \(.*?\):)',
+                r'<b>\1 \2</b>',
+                speaker
+            )
         
     # Highlight/Bullet and Report Step
     if run_highlights:
