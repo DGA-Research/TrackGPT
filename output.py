@@ -388,10 +388,10 @@ def generate_html_report(
                   if not safe_url.startswith(('http://', 'https://')): safe_url = 'http://' + safe_url
                   # Use the already escaped date for the link text
                   safe_link_text = safe_formatted_date_mdy
-                  citation = citation = f'[{safe_source}, <a href="{safe_url}" target="_blank" rel="noopener noreferrer"><em>{safe_link_text}</em></a>] ({type_input}) {time}'
+                  citation = citation = f'[{safe_source}, <a href="{safe_url}" target="_blank" rel="noopener noreferrer"><em>{safe_link_text}</em></a>]'
              else:
                   # Use already escaped components
-                  citation = f'[{safe_source}, {safe_formatted_date_mdy}] ({type_input}) {time}'
+                  citation = f'[{safe_source}, {safe_formatted_date_mdy}]'
 
              safe_headline = html.escape(headline)
              html_parts.append(f"<li>{safe_headline}</li>")
