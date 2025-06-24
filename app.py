@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime
 import re
 import hmac
-st.set_option('server.maxUploadSize', 800) 
+st.set_option('server.maxUploadSize', 1000) 
 
 def check_password():
     """Returns `True` if the user entered the correct password."""
