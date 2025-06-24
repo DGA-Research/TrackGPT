@@ -180,7 +180,7 @@ def extract_raw_bullet_data_from_text(
     metadata: Dict[str, Any],
     open_ai_api,
     prompt_type,
-    max_bullets: int = 15,
+    max_bullets: None,
 ) -> List[Dict[str, Optional[str]]]:
     """
     Extracts structured bullet points from a transcript using the OpenAI API.
