@@ -35,6 +35,9 @@ if check_password():
     from analyzer import extract_raw_bullet_data_from_text
     from output import generate_html_report, save_text_file
     from output import generate_html_report_bullets
+
+    # add config.toml
+    .streamlit/config.toml
     
     # UI layout
     st.set_page_config(page_title="TrackGPT", layout="centered")
