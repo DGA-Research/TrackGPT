@@ -276,7 +276,7 @@ def generate_html_report(
         }
         
         .meta {
-            background: #f5f5f5;
+            # background: #f5f5f5;
             padding: 10px;
             border-radius: 5px;
             margin-bottom: 24pt;
@@ -318,7 +318,7 @@ def generate_html_report(
         .transcript {
             white-space: pre-wrap;
             font-family: monospace;
-            background-color: #f8f8f8;
+            # background-color: #f8f8f8;
             padding: 12pt;
             border: 1px solid #ddd;
             margin-top: 12pt; /* Increase space above transcript */
