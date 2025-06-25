@@ -274,6 +274,13 @@ def generate_html_report(
             padding: 4pt 6pt;
             margin: 24pt 0 12pt 0;
         }
+
+        h3 {
+            font-size: 8pt;
+            font-weight: bold;
+            padding: 4pt 6pt;
+            margin: 10pt 0 10pt 0;
+        }
         
         .meta {
             # background: #f5f5f5;
