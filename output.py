@@ -326,7 +326,7 @@ def generate_html_report(
             white-space: pre-wrap;
             font-family: monospace;
             # background-color: #f8f8f8;
-            padding: 12pt;
+            # padding: 12pt;
             border: 1px solid #ddd;
             # margin-top: 4pt; /* Increase space above transcript */
             word-wrap: break-word;
