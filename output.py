@@ -321,7 +321,7 @@ def generate_html_report(
             # background-color: #f8f8f8;
             padding: 12pt;
             border: 1px solid #ddd;
-            margin-top: 12pt; /* Increase space above transcript */
+            margin-top: 4pt; /* Increase space above transcript */
             word-wrap: break-word;
             overflow-wrap: break-word;
         }
