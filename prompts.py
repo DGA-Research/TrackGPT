@@ -20,7 +20,7 @@ TEXT_HIGHLIGHT_PROMPT_TEMPLATE = """# ROLE: Meticulous Communications Analyst & 
 
 # ================== INSTRUCTIONS ==================
 
-1. **Extract up to {max_bullets} bullet points** based only on the transcript above.
+1. **Extract bullet points** based only on the transcript above.
 2. **Each bullet should reflect a single, standalone factual or rhetorical claim** made by or directly about {target_name}.
 3. Use the speaker’s own words where impactful, but summarize concisely if needed.
 4. Capture statements that:
@@ -134,7 +134,7 @@ TEXT_BULLET_PROMPT_TEMPLATE = """# ROLE: Meticulous Communications Analyst & Inf
 #     *   **Be Descriptive & Significant:** Make the summary informative. Capture the *essence* of the point. GOOD: `Interviewer Claimed {target_name}'s New Policy Would Impact Farmers.` BAD: `Interviewer Talked About Policy.`
 #     *   **Optional Short Quote Snippet:** You MAY include a *very short* (under 10 words), impactful, verbatim quote snippet in double quotes within the summary *if* it *is* the core point AND is directly spoken by the actor named in the headline (e.g., `{target_name} Described New Project As "Revolutionary".`). Use sparingly, especially for third-party claims.
 #     *   **Final Format:** Ensure the entire headline ends with a single period. Output as plain text. **DO NOT apply special capitalization (like Title Case) here.**
-# 6. **Limit:** Extract up to **{max_bullets}** distinct factual points. Prioritize statements with potential PR implications or significant informational value, including both self-stated points and claims made *about* the target.
+# 6. **Limit:** Prioritize statements with potential PR implications or significant informational value, including both self-stated points and claims made *about* the target.
 # 7.  **Empty Result:** If no relevant points are found, output only the text "@@NO BULLETS FOUND@@".
 
 # ================== OUTPUT FORMAT (PLAIN TEXT ONLY) ==================
