@@ -200,7 +200,7 @@ def format_text_bullet_prompt(
             video_uploader=uploader,
             video_upload_date=upload_date,
             video_platform=platform_display,
-            video_url=url,
+            video_url=url
         )
     except KeyError as e:
         logging.error(f"Missing key in Text Bullet prompt formatting: {e}")
