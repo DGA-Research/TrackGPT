@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import datetime
 import re
 import hmac
+import weasyprint
 
 def check_password():
     """Returns `True` if the user entered the correct password."""
@@ -190,6 +191,18 @@ if check_password():
     
         # Show HTML report before any buttons (so it doesn’t disappear)
         st.markdown(st.session_state["html_report"], unsafe_allow_html=True)
+
+         # Convert HTML string to PDF (stored in memory)
+        html = st.session_state["html_report"]
+        pdf_bytes = weasyprint.HTML(string=html).write_pdf()
+        
+        # Display the download button for PDF
+        st.download_button(
+            "📄 Download PDF Report",
+            data=pdf_bytes,
+            file_name="report.pdf",
+            mime="application/pdf"
+        )
     
         # Download buttons (after rendering the report)
         st.download_button(
@@ -210,6 +223,14 @@ if check_password():
     # Display saved results after report generation
     elif "html_report" in st.session_state:
         st.markdown(st.session_state["html_report"], unsafe_allow_html=True)
+    
+        # Display the download button for PDF
+        st.download_button(
+            "📄 Download PDF Report",
+            data=pdf_bytes,
+            file_name="report.pdf",
+            mime="application/pdf"
+        )
     
         st.download_button(
             "📄 Download HTML Report",
