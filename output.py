@@ -296,7 +296,7 @@ def generate_html_report(
         .bullets-list {
             list-style-type: disc;
             padding-left: 1.5em;
-            margin-bottom: 24pt;
+            # margin-bottom: 24pt;
         }
         
         .bullets-list li {
