@@ -353,7 +353,7 @@ def generate_html_report(
 
     # --- Bullets Section ---
     # (Existing bullet processing logic remains the same)
-    html_parts.append("<h2>Extracted Bullet Points</h2>")
+    html_parts.append("<h2>HIGHLIGHTS</h2>")
     html_parts.append("<ul class=\"bullets-list\">")
     if extracted_bullets_raw:
         # ... (keep existing loop for processing bullets) ...
@@ -400,7 +400,7 @@ def generate_html_report(
     html_parts.append("</div>") # Close bullets-container
 
     # --- Full Transcript Section ---
-    html_parts.append("<h2>Full Transcript</h2>")
+    html_parts.append("<h2>TRANSCRIPT</h2>")
     safe_transcript = html.escape(transcript_text if transcript_text else "Transcript unavailable.")
     # html_parts.append(f"<div class=\"transcript\">{safe_transcript}</div>")
     html_parts.append(transcript_text)  # Already wrapped in <p> tags
@@ -562,7 +562,7 @@ def generate_html_report_bullets(
 
     # --- Bullets Section ---
     # (Existing bullet processing logic remains the same)
-    html_parts.append("<h2>HIGHLIGHTS</h2>")
+    html_parts.append("<h2>BULLETS</h2>")
     html_parts.append("<div class=\"bullets-container\">")
     if extracted_bullets_raw:
         # ... (keep existing loop for processing bullets) ...
