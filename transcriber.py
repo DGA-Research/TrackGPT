@@ -81,6 +81,7 @@ def transcribe_file(audio_file_path, openai_key, assemblyai_key):
     )
 
     print("RETURNING")
+    print("LABELED TRANSCRIPT BY CHAT", response.choices[0].message.content)
     # return the labeled transcript
     return(response.choices[0].message.content)
 
