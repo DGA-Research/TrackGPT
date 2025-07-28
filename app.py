@@ -171,7 +171,7 @@ if check_password():
             transcript_docx = '<p>' + transcript_docx.strip() + '</p>'
 
         # Edit transcript step
-        st.text_area(transcript)
+        transcript_edited = st.text_area("Edit Transcript and Confirm", value=transcript)
             
         # Highlight/Bullet and Report Step
         if run_highlights:
