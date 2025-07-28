@@ -171,7 +171,7 @@ if check_password():
             transcript_docx = '<p>' + transcript_docx.strip() + '</p>'
 
         # Play Audio
-        st.audio(audio_path, format="audio/wav", start_time=0, *, sample_rate=None, end_time=None, loop=False, autoplay=False, width="stretch")
+        st.audio(audio_path, format="audio/wav", start_time=0, sample_rate=None, end_time=None, loop=False, autoplay=False, width="stretch")
 
         # Edit transcript step
         transcript_edited = st.text_area("Edit Transcript and Confirm", value=transcript)
