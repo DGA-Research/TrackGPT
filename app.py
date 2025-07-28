@@ -172,9 +172,10 @@ if check_password():
 
         # Edit transcript step
         transcript_edited = st.text_area("Edit Transcript and Confirm", value=transcript)
+        confirm_transcript = st.button("Confirm Transcript and Go to Highlights")
             
         # Highlight/Bullet and Report Step
-        if run_highlights:
+        if run_highlights and confirm_transcript:
             with st.spinner("Writing Highlights..."):
             # Analyze
                 try:
