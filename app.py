@@ -169,6 +169,9 @@ if check_password():
             transcript = '<p>' + transcript.strip() + '</p>'
             transcript_docx = re.sub(r'(\[\d+:\d+:\d+\.\d+\] Speaker [A-Z])', r'<br><br>\1', transcript)
             transcript_docx = '<p>' + transcript_docx.strip() + '</p>'
+
+        # Edit transcript step
+        st.text_area(transcript)
             
         # Highlight/Bullet and Report Step
         if run_highlights:
