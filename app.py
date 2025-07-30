@@ -175,17 +175,13 @@ if check_password():
 
         # Edit transcript step
         transcript_edited = st.text_area("Edit Transcript and Confirm", value=transcript)
-        confirm_transcript = st.button("Confirm Transcript and Go to Highlights")
+        confirm_transcript = st.checkbox("Confirm Transcript and Go to Highlights")
 
         # Debug section
         st.write("Debug Info:")
         st.write(f"run_highlights: {run_highlights}")
         st.write(f"run_bullets: {run_bullets}")
         st.write(f"confirm_transcript: {confirm_transcript}")
-
-        # Try to get it to wait
-        while not confirm_transcript:
-            x = 1
             
         # Highlight/Bullet and Report Step
         if confirm_transcript:
