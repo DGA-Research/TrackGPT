@@ -188,8 +188,9 @@ if check_password():
             
         # Highlight/Bullet and Report Step
         if confirm_transcript:
-            st.write("confirmed transcript")
-            # Analyze
+            with st.spinner("Writing Highlights...")
+                st.write("confirmed transcript")
+                # Analyze
                 try:
                     type = "format_text_highlight_prompt"
                     bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY, type)
