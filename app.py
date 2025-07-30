@@ -188,7 +188,7 @@ if check_password():
             
         # Highlight/Bullet and Report Step
         if confirm_transcript:
-            with st.spinner("Writing Highlights...")
+            with st.spinner("Writing Highlights..."):
                 st.write("confirmed transcript")
                 # Analyze
                 try:
