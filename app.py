@@ -236,6 +236,11 @@ if check_password():
                 except Exception as e:
                         st.error(f"Failed to generate report: {e}")
                         st.stop()
+        
+        st.write("Debug Info:")
+        st.write(f"run_highlights: {run_highlights}")
+        st.write(f"run_bullets: {run_bullets}")
+        st.write(f"confirm_transcript: {confirm_transcript}")
     
         # Output
         if confirm_transcript:
