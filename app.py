@@ -269,22 +269,21 @@ if check_password():
                     mime="audio/mpeg"
                 )
                 
-    if confirm_transcript:
         # Display saved results after report generation
-        elif "html_report" in st.session_state:
-            st.markdown(st.session_state["html_report"], unsafe_allow_html=True)
+    elif "html_report" in st.session_state:
+        st.markdown(st.session_state["html_report"], unsafe_allow_html=True)
             
-            st.download_button(
-                "📄 Download HTML Report",
-                data=st.session_state["html_report"],
-                file_name="report.html",
-                mime="text/html"
-            )
+        st.download_button(
+            "📄 Download HTML Report",
+            data=st.session_state["html_report"],
+            file_name="report.html",
+            mime="text/html"
+        )
         
-            if "mp3_data" in st.session_state and st.session_state["mp3_data"]:
-                st.download_button(
-                    "🎵 Download MP3 File",
-                    data=st.session_state["mp3_data"],
-                    file_name="audio.mp3",
-                    mime="audio/mpeg"
-                )
+        if "mp3_data" in st.session_state and st.session_state["mp3_data"]:
+            st.download_button(
+                "🎵 Download MP3 File",
+                data=st.session_state["mp3_data"],
+                file_name="audio.mp3",
+                mime="audio/mpeg"
+            )
