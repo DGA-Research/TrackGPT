@@ -173,6 +173,12 @@ if check_password():
         # Play Audio
         st.audio(audio_path, format="audio/wav", start_time=0, sample_rate=None, end_time=None, loop=False, autoplay=False, width="stretch")
 
+        # Debug section
+        st.write("Debug Info:")
+        st.write(f"run_highlights: {run_highlights}")
+        st.write(f"run_bullets: {run_bullets}")
+        st.write(f"confirm_transcript: {confirm_transcript}")
+
         # Edit transcript step
         transcript_edited = st.text_area("Edit Transcript and Confirm", value=transcript)
         confirm_transcript = st.button("Confirm Transcript and Go to Highlights")
