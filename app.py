@@ -184,17 +184,11 @@ if check_password():
         st.write(f"confirm_transcript: {confirm_transcript}")
 
         while not confirm_transcript:
-            st.write("not confirmed")
+            print(not confirmed)
             
         # Highlight/Bullet and Report Step
         if confirm_transcript:
             st.write("confirmed transcript")
-            # Debug section
-            st.write("Debug Info:")
-            st.write(f"run_highlights: {run_highlights}")
-            st.write(f"run_bullets: {run_bullets}")
-            st.write(f"confirm_transcript: {confirm_transcript}")
-            with st.spinner("Writing Highlights..."):
             # Analyze
                 try:
                     type = "format_text_highlight_prompt"
