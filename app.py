@@ -185,6 +185,11 @@ if check_password():
             
         # Highlight/Bullet and Report Step
         if run_highlights and confirm_transcript:
+            # Debug section
+            st.write("Debug Info:")
+            st.write(f"run_highlights: {run_highlights}")
+            st.write(f"run_bullets: {run_bullets}")
+            st.write(f"confirm_transcript: {confirm_transcript}")
             with st.spinner("Writing Highlights..."):
             # Analyze
                 try:
