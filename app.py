@@ -198,7 +198,7 @@ if check_password():
                 except Exception as e:
                         st.error(f"Failed to generate report: {e}")
                         st.stop()
-        elif run_bullets:
+        elif run_bullets and confirm_transcript:
             with st.spinner("Writing Bullets..."):
             # Analyze
                 type = "format_text_bullet_prompt"
@@ -227,62 +227,64 @@ if check_password():
                         st.stop()
     
         # Output
-        st.success("✅ Analysis complete!")
-    
-        # Save HTML and MP3 to session state to survive re-runs
-        st.session_state["html_report"] = html
-        if video_url:
-            try:
-                with open(audio_path, "rb") as f:
-                    mp3_bytes = f.read()
-                st.session_state["mp3_data"] = mp3_bytes
-            except Exception as e:
-                st.warning(f"Could not prepare MP3 download: {e}")
-                st.session_state["mp3_data"] = None
-    
-        # Show HTML report before any buttons (so it doesn’t disappear)
-        st.markdown(st.session_state["html_report"], unsafe_allow_html=True)
-        # st.markdown(st.session_state["docx_report"], unsafe_allow_html=True)
-    
-        # Download buttons (after rendering the report)
-        st.download_button(
-            "📄 Download HTML Report",
-            data=st.session_state["html_report"],
-            file_name=report_path.name,
-            mime="text/html"
-        )
-
-        docx_buffer = html2docx(docx, title="Converted Document")
-        st.download_button(
-            label="Download DOCX",
-            data=docx_buffer.getvalue(),
-            file_name=f"{title} Report.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
+        if confirm_transcript:
+            st.success("✅ Analysis complete!")
         
-        if video_url:
+            # Save HTML and MP3 to session state to survive re-runs
+            st.session_state["html_report"] = html
+            if video_url:
+                try:
+                    with open(audio_path, "rb") as f:
+                        mp3_bytes = f.read()
+                    st.session_state["mp3_data"] = mp3_bytes
+                except Exception as e:
+                    st.warning(f"Could not prepare MP3 download: {e}")
+                    st.session_state["mp3_data"] = None
+        
+            # Show HTML report before any buttons (so it doesn’t disappear)
+            st.markdown(st.session_state["html_report"], unsafe_allow_html=True)
+            # st.markdown(st.session_state["docx_report"], unsafe_allow_html=True)
+        
+            # Download buttons (after rendering the report)
             st.download_button(
-                "🎵 Download MP3 File",
-                data=st.session_state["mp3_data"],
-                file_name=audio_path.name,
-                mime="audio/mpeg"
+                "📄 Download HTML Report",
+                data=st.session_state["html_report"],
+                file_name=report_path.name,
+                mime="text/html"
             )
     
-    # Display saved results after report generation
-    elif "html_report" in st.session_state:
-        st.markdown(st.session_state["html_report"], unsafe_allow_html=True)
-        
-        st.download_button(
-            "📄 Download HTML Report",
-            data=st.session_state["html_report"],
-            file_name="report.html",
-            mime="text/html"
-        )
-    
-        if "mp3_data" in st.session_state and st.session_state["mp3_data"]:
+            docx_buffer = html2docx(docx, title="Converted Document")
             st.download_button(
-                "🎵 Download MP3 File",
-                data=st.session_state["mp3_data"],
-                file_name="audio.mp3",
-                mime="audio/mpeg"
+                label="Download DOCX",
+                data=docx_buffer.getvalue(),
+                file_name=f"{title} Report.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
+            
+            if video_url:
+                st.download_button(
+                    "🎵 Download MP3 File",
+                    data=st.session_state["mp3_data"],
+                    file_name=audio_path.name,
+                    mime="audio/mpeg"
+                )
+                
+    if confirm_transcript:
+        # Display saved results after report generation
+        elif "html_report" in st.session_state:
+            st.markdown(st.session_state["html_report"], unsafe_allow_html=True)
+            
+            st.download_button(
+                "📄 Download HTML Report",
+                data=st.session_state["html_report"],
+                file_name="report.html",
+                mime="text/html"
+            )
+        
+            if "mp3_data" in st.session_state and st.session_state["mp3_data"]:
+                st.download_button(
+                    "🎵 Download MP3 File",
+                    data=st.session_state["mp3_data"],
+                    file_name="audio.mp3",
+                    mime="audio/mpeg"
+                )
