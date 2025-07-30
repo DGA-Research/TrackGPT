@@ -184,7 +184,7 @@ if check_password():
         st.write(f"confirm_transcript: {confirm_transcript}")
 
         while not confirm_transcript:
-            print(not confirmed)
+            print("not confirmed")
             
         # Highlight/Bullet and Report Step
         if confirm_transcript:
