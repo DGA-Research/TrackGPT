@@ -203,12 +203,8 @@ if check_password():
         )
         
         col1, col2 = st.columns(2)
-        with col1:
-            if st.button("← Back to Input"):
-                st.session_state.step = "input"
-                st.rerun()
         
-        with col2:
+        with col1:
             if st.button("Generate Report →"):
                 # Update transcript with edits
                 transcript = re.sub(r'(\[\d+:\d+:\d+\.\d+\] Speaker [A-Z])', r'</p><p>\1', edited_transcript)
