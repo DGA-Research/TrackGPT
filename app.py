@@ -184,12 +184,11 @@ if check_password():
         st.write(f"confirm_transcript: {confirm_transcript}")
 
         while not confirm_transcript:
-        # Check for the condition
-            if confirm_transcript:
-                confirm_transcript = True
+            st.write("not confirmed")
             
         # Highlight/Bullet and Report Step
         if confirm_transcript:
+            st.write("confirmed transcript")
             # Debug section
             st.write("Debug Info:")
             st.write(f"run_highlights: {run_highlights}")
