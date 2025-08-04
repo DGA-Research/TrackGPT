@@ -238,7 +238,7 @@ if check_password():
                 transcript = re.sub(r'(\[\d+:\d+:\d+\.\d+\] Speaker [A-Z])', r'</p><p>\1', edited_transcript)
                 transcript = '<p>' + transcript.strip() + '</p>'
                 
-                pattern = r'\b' + re.escape(original_speaker) + r'(?=:)'
+                pattern = r'Speaker\s+([A-Z]):\s+(\w+)'
                 
                 # Make list of edited speakers
                 matches = re.findall(pattern, edited_speaker)
