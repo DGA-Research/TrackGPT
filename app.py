@@ -237,6 +237,19 @@ if check_password():
                 # Update transcript with edits
                 transcript = re.sub(r'(\[\d+:\d+:\d+\.\d+\] Speaker [A-Z])', r'</p><p>\1', edited_transcript)
                 transcript = '<p>' + transcript.strip() + '</p>'
+                # edit transcript with new speakers
+                pattern = r'(Speaker\s+[A-Z])\s+\(([^)]+)\):'
+                # Make list of edited speakers
+                matches = re.findall(pattern, edited_speaker)
+                unique_speakers = set()
+                for speaker_id, name in matches:
+                    unique_speakers.add(name)
+                speaker_list_edited = sorted(list(unique_speakers))
+                counter = 0
+                for item in speaker_list:
+                    # Replace the item using regex
+                    transcript = re.sub(pattern, speaker_list_edited[counter], transcript)
+                    counter += 1
                 st.session_state.transcript = transcript
                 st.session_state.step = "generate_report"
                 st.rerun()
