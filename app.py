@@ -251,6 +251,7 @@ if check_password():
                 print("st.session_state.speaker_list", st.session_state.speaker_list)
                 for counter, item in enumerate(st.session_state.speaker_list):
                     escaped_item = re.escape(item)
+                    print("ESCAPED_ITEM", escaped_item)
                     transcript = re.sub(escaped_item, speaker_list_edited[counter], transcript)
                 st.session_state.transcript = transcript
                 st.session_state.step = "generate_report"
