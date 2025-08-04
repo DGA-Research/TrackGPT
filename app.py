@@ -237,26 +237,42 @@ if check_password():
                 # Update transcript with edits
                 transcript = re.sub(r'(\[\d+:\d+:\d+\.\d+\] Speaker [A-Z])', r'</p><p>\1', edited_transcript)
                 transcript = '<p>' + transcript.strip() + '</p>'
-                # edit transcript with new speakers
-                pattern = r'Speaker\s+([A-Z]):\s+(\w+)'
+                
+                pattern = r'\b' + re.escape(original_speaker) + r'(?=:)'
+                
                 # Make list of edited speakers
                 matches = re.findall(pattern, edited_speaker)
-                st.write("edited_speakers" + edited_speaker)
-                unique_speakers = set()
+                st.write("edited_speakers: " + edited_speaker)
+                
+                # Extract unique speakers while preserving order
+                unique_speakers = []
+                seen = set()
                 for speaker_id, name in matches:
-                    unique_speakers.add(name)
-                speaker_list_edited = sorted(list(unique_speakers))
-                counter = 0
-                print("speaker_list_edited", speaker_list_edited)
-                print("st.session_state.speaker_list", st.session_state.speaker_list)
-                for counter, item in enumerate(st.session_state.speaker_list):
-                    escaped_item = re.escape(item)
-                    print("ESCAPED_ITEM", escaped_item)
-                    transcript = re.sub(escaped_item, speaker_list_edited[counter], transcript)
-                st.session_state.transcript = transcript
-                st.session_state.step = "generate_report"
-                st.rerun()
-
+                    if name not in seen:
+                        unique_speakers.append(name)
+                        seen.add(name)
+                
+                speaker_list_edited = unique_speakers
+                print("speaker_list_edited:", speaker_list_edited)
+                print("st.session_state.speaker_list:", st.session_state.speaker_list)
+                
+                # Ensure both lists have the same length
+                if len(st.session_state.speaker_list) != len(speaker_list_edited):
+                    st.error(f"Mismatch: Original has {len(st.session_state.speaker_list)} speakers, edited has {len(speaker_list_edited)} speakers")
+                else:
+                    # Replace speaker labels in transcript
+                    transcript = st.session_state.transcript  # Make sure we're working with the current transcript
+                    
+                    for original_speaker, edited_speaker in zip(st.session_state.speaker_list, speaker_list_edited):
+                        # Use word boundaries to avoid partial matches
+                        # This pattern matches the speaker name when it appears as a complete word
+                        pattern = r'\b' + re.escape(original_speaker) + r'\b'
+                        transcript = re.sub(pattern, edited_speaker, transcript)
+                        print(f"Replaced '{original_speaker}' with '{edited_speaker}'")
+                    
+                    st.session_state.transcript = transcript
+                    st.session_state.step = "generate_report"
+                    st.rerun()
     
     # STEP 3: GENERATE REPORT
     elif st.session_state.step == "generate_report":
