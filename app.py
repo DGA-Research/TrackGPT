@@ -218,15 +218,15 @@ if check_password():
             value=st.session_state.transcript.replace('<p>', '').replace('</p>', '\n\n'),
             height=400
         )
-        
-        col1, col2 = st.columns(2)
 
         # Confirm Speaker
         edited_speaker = st.text_area(
             "Edit Speakers:",
             value=st.session_state.speaker_list,
-            height=400
+            height=100
         )
+
+        col1, col2 = st.columns(2)
         
         with col1:
             if st.button("Generate Report →"):
