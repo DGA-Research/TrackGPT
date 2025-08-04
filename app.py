@@ -262,12 +262,8 @@ if check_password():
                 else:
                     # Replace speaker labels in transcript
                     transcript = st.session_state.transcript  # Make sure we're working with the current transcript
-                    
                     for original_speaker, edited_speaker in zip(st.session_state.speaker_list, speaker_list_edited):
-                        # Use word boundaries to avoid partial matches
-                        # This pattern matches the speaker name when it appears as a complete word
-                        pattern = r'\b' + re.escape(original_speaker) + r'\b'
-                        transcript = re.sub(pattern, edited_speaker, transcript)
+                        transcript = transcript.replace(original_speaker, edited_speaker)
                         st.write(f"Replaced '{original_speaker}' with '{edited_speaker}'")
                         st.write(transcript)
                     
