@@ -221,7 +221,7 @@ if check_password():
 
         # Confirm Speaker
         speaker_text = ""
-        for speaker in session_state.speaker_list:
+        for speaker in st.session_state.speaker_list:
             speaker_text = speaker_text + '\n'
 
         edited_speaker = st.text_area(
