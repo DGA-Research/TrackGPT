@@ -248,6 +248,7 @@ if check_password():
                 counter = 0
                 for item in st.session_state.speaker_list:
                     # Replace the item using regex
+                    print("for item in st.session_state.speaker_list")
                     transcript = re.sub(pattern, speaker_list_edited[counter], transcript)
                     print("speaker_list_edited[counter]: " + speaker_list_edited[counter])
                     counter += 1
