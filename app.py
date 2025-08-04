@@ -268,7 +268,7 @@ if check_password():
                         # This pattern matches the speaker name when it appears as a complete word
                         pattern = r'\b' + re.escape(original_speaker) + r'\b'
                         transcript = re.sub(pattern, edited_speaker, transcript)
-                        print(f"Replaced '{original_speaker}' with '{edited_speaker}'")
+                        st.write(f"Replaced '{original_speaker}' with '{edited_speaker}'")
                     
                     st.session_state.transcript = transcript
                     st.session_state.step = "generate_report"
