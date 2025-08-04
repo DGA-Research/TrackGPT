@@ -226,7 +226,7 @@ if check_password():
 
         edited_speaker = st.text_area(
             "Edit Speakers:",
-            value=st.speaker_text,
+            value=speaker_text,
             height=100
         )
 
