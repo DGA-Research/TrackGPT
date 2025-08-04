@@ -172,7 +172,7 @@ if check_password():
                     transcript = re.sub(r'(\[\d+:\d+:\d+\.\d+\] Speaker [A-Z])', r'</p><p>\1', transcript)
                     transcript = '<p>' + transcript.strip() + '</p>'
                    
-                    pattern = r'\[[\d:]+\]\s+(Speaker\s+[A-Z])\s+\(([^)]+)\):'
+                    pattern = r'\[[\d:.]+\]\s+(Speaker\s+[A-Z])\s+\(([^)]+)\):'
     
                     # Find all matches
                     matches = re.findall(pattern, transcript)
