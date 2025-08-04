@@ -245,7 +245,7 @@ if check_password():
                 for speaker_id, name in matches:
                     unique_speakers.add(name)
                 speaker_list_edited = sorted(list(unique_speakers))
-                for counter, item in enumerate(speaker_list):
+                for counter, item in enumerate(st.session_state.speaker_list):
                     escaped_item = re.escape(item)
                     transcript = re.sub(escaped_item, speaker_list_edited[counter], transcript)
                 st.session_state.transcript = transcript
