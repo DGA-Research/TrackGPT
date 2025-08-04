@@ -241,7 +241,7 @@ if check_password():
                 pattern = r'(Speaker\s+[A-Z])\s+\(([^)]+)\):'
                 # Make list of edited speakers
                 matches = re.findall(pattern, edited_speaker)
-                print("edited_speakers" + edited_speaker)
+                st.write("edited_speakers" + edited_speaker)
                 unique_speakers = set()
                 for speaker_id, name in matches:
                     unique_speakers.add(name)
