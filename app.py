@@ -245,13 +245,9 @@ if check_password():
                 for speaker_id, name in matches:
                     unique_speakers.add(name)
                 speaker_list_edited = sorted(list(unique_speakers))
-                counter = 0
-                for item in st.session_state.speaker_list:
-                    # Replace the item using regex
-                    print("for item in st.session_state.speaker_list")
-                    transcript = re.sub(pattern, speaker_list_edited[counter], transcript)
-                    print("speaker_list_edited[counter]: " + speaker_list_edited[counter])
-                    counter += 1
+                for counter, item in enumerate(speaker_list):
+                    escaped_item = re.escape(item)
+                    transcript = re.sub(escaped_item, speaker_list_edited[counter], transcript)
                 st.session_state.transcript = transcript
                 st.session_state.step = "generate_report"
                 st.rerun()
