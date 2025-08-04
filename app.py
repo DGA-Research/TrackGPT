@@ -171,7 +171,24 @@ if check_password():
                     # Format transcript for HTML
                     transcript = re.sub(r'(\[\d+:\d+:\d+\.\d+\] Speaker [A-Z])', r'</p><p>\1', transcript)
                     transcript = '<p>' + transcript.strip() + '</p>'
+                   
+                    pattern = r'\[[\d:]+\]\s+(Speaker\s+[A-Z])\s+\(([^)]+)\):'
+    
+                    # Find all matches
+                    matches = re.findall(pattern, transcript_text)
                     
+                    # Use set to automatically handle duplicates
+                    unique_speakers = set()
+                    
+                    # Format each speaker and add to set (duplicates automatically ignored)
+                    for speaker_id, name in matches:
+                        formatted_speaker = f"{speaker_id}: {name}"
+                        unique_speakers.add(formatted_speaker)
+                    
+                    # Convert to sorted list for consistent output
+                    speaker_list = sorted(list(unique_speakers))
+                
+                    st.session_state.speaker_list = speaker_list
                     st.session_state.transcript = transcript
                     st.session_state.step = "edit_transcript"
                     st.rerun()
@@ -203,6 +220,13 @@ if check_password():
         )
         
         col1, col2 = st.columns(2)
+
+        # Confirm Speaker
+        edited_speaker = st.text_area(
+            "Edit Speakers:",
+            value=st.session_state.speaker_list,
+            height=400
+        )
         
         with col1:
             if st.button("Generate Report →"):
@@ -212,6 +236,7 @@ if check_password():
                 st.session_state.transcript = transcript
                 st.session_state.step = "generate_report"
                 st.rerun()
+
     
     # STEP 3: GENERATE REPORT
     elif st.session_state.step == "generate_report":
