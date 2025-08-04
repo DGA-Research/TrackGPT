@@ -246,7 +246,7 @@ if check_password():
                     unique_speakers.add(name)
                 speaker_list_edited = sorted(list(unique_speakers))
                 counter = 0
-                for item in speaker_list:
+                for item in st.session_state.speaker_list:
                     # Replace the item using regex
                     transcript = re.sub(pattern, speaker_list_edited[counter], transcript)
                     counter += 1
