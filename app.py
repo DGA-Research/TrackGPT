@@ -175,7 +175,7 @@ if check_password():
                     pattern = r'\[[\d:]+\]\s+(Speaker\s+[A-Z])\s+\(([^)]+)\):'
     
                     # Find all matches
-                    matches = re.findall(pattern, transcript_text)
+                    matches = re.findall(pattern, transcript)
                     
                     # Use set to automatically handle duplicates
                     unique_speakers = set()
