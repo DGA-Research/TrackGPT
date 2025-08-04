@@ -245,6 +245,7 @@ if check_password():
                 for speaker_id, name in matches:
                     unique_speakers.add(name)
                 speaker_list_edited = sorted(list(unique_speakers))
+                counter = 0
                 for counter, item in enumerate(st.session_state.speaker_list):
                     print("speaker_list_edited", speaker_list_edited)
                     print("st.session_state.speaker_list", st.session_state.speaker_list)
