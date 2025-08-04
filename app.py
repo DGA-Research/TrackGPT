@@ -249,6 +249,7 @@ if check_password():
                 for item in st.session_state.speaker_list:
                     # Replace the item using regex
                     transcript = re.sub(pattern, speaker_list_edited[counter], transcript)
+                    print("speaker_list_edited[counter]: " + speaker_list_edited[counter])
                     counter += 1
                 st.session_state.transcript = transcript
                 st.session_state.step = "generate_report"
