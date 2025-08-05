@@ -981,7 +981,7 @@ def generate_html_report_both(
 
     # --- Metadata Section ---
     html_parts.append("<div class=\"meta\">")
-    html_parts.append("<h2>Video Metadata</h2>")
+    html_parts.append("<h3>Video Metadata</h3>")
     html_parts.append(f"<p><strong>Title:</strong> {html.escape(metadata.get('title', 'N/A'))}</p>")
     html_parts.append(f"<p><strong>Uploader/Channel:</strong> {html.escape(metadata.get('uploader', 'N/A'))}</p>")
     html_parts.append(f"<p><strong>Upload Date:</strong> {display_date}</p>")
@@ -1116,6 +1116,7 @@ def generate_html_report_both(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
     
+
 
 
 
