@@ -789,7 +789,6 @@ def generate_html_report_bullets(
 def generate_html_report_both(
     metadata: Dict[str, Any],
     extracted_bullets_raw: List[Dict[str, Optional[str]]],
-    extracted_highlights_raw: List[Dict[str, Optional[str]]],
     transcript_text: str,
     target_name: str
 ) -> str:
@@ -809,7 +808,7 @@ def generate_html_report_both(
         A string containing the complete HTML content of the report.
     """
     logging.info(f"Generating HTML report for {target_name}...")
-
+    print("extracted_bullets_raw", extracted_bullets_raw)
     # --- Determine Report Title Components ---
     report_prefix = "Tracking Report" # Or "Analysis", "Research Report", etc.
 
@@ -817,6 +816,10 @@ def generate_html_report_both(
     uploader = metadata.get('uploader', '').strip()
     extractor = metadata.get('extractor', '').strip()
     source_context = "Unknown Source" # Default fallback
+
+    # Get video type
+    type_input = metadata.get('type_input', '').strip()
+    type_input = type_input.upper()
 
     if uploader and uploader.lower() not in ['unknown uploader', 'n/a', '']:
         source_context = uploader
@@ -847,10 +850,6 @@ def generate_html_report_both(
     uploader = metadata.get('uploader', '').strip()
     extractor = metadata.get('extractor', '').strip()
     source_context = "Unknown Source" # Default fallback
-
-    # Get video type
-    type_input = metadata.get('type_input', '').strip()
-    type_input = type_input.upper()
 
     if uploader and uploader.lower() not in ['unknown uploader', 'n/a', '']:
         source_context = uploader
@@ -1076,7 +1075,6 @@ def generate_html_report_both(
                       # If parsing fails, use the raw value as fallback
                       formatted_date_mdy = str(raw_bullet_date)
 
-
              # Escape source and date components BEFORE creating the citation string
              safe_source = html.escape(source)
              safe_formatted_date_mdy = html.escape(formatted_date_mdy)
@@ -1099,19 +1097,21 @@ def generate_html_report_both(
     html_parts.append("</div>") # Close bullets-container
 
     # --- Full Transcript Section ---
-    # (Existing transcript logic remains the same)
     html_parts.append("<h3>TRANSCRIPT</h3>")
     safe_transcript = html.escape(transcript_text if transcript_text else "Transcript unavailable.")
     # html_parts.append(f"<div class=\"transcript\">{safe_transcript}</div>")
-    html_parts.append(transcript_text)
+    html_parts.append(transcript_text)  # Already wrapped in <p> tags
 
+
+    # ✅ Moved earlier: transcript is now inside the research-dossier container
     # --- Closing HTML ---
-    html_parts.append("</div>") # Close research-dossier
+    html_parts.append("</div>")  # Close research-dossier
     html_parts.append("</body></html>")
 
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
     
+
 
 
 
