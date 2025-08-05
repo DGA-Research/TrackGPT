@@ -221,8 +221,14 @@ if check_password():
 
         # Confirm Speaker
         speaker_text = ""
+        counter = 0
         for speaker in st.session_state.speaker_list:
-            speaker_text = speaker_text + "\n" + speaker
+            if counter == 0:
+                speaker_text = speaker
+            else:
+                speaker_text = speaker_text + "\n" + speaker
+            counter += 1
+
 
         edited_speaker = st.text_area(
             "Edit Speakers:",
