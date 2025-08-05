@@ -126,6 +126,9 @@ if check_password():
         with col3:
             if st.button("Transcript Only"):
                 st.session_state.report_type = "transcript_only"
+        with col4:
+            if st.button("Generate with Highlights and Bullets"):
+                st.session_state.report_type = "both"
         
         # Validate inputs and proceed
         if st.session_state.report_type and target_name and (transcript_input or uploaded_file or video_url):
@@ -337,6 +340,35 @@ if check_password():
                         st.session_state.target_name
                     )
                     
+            elif st.session_state.report_type == "both":
+                with st.spinner("Writing Bullets..."):
+                    bullets = extract_raw_bullet_data_from_text(
+                        st.session_state.transcript, 
+                        st.session_state.target_name, 
+                        st.session_state.metadata, 
+                        OPENAI_API_KEY, 
+                        "format_text_bullet_prompt"
+                    )
+
+                with st.spinner("Writing Highlights..."):
+                        highlights = extract_raw_bullet_data_from_text(
+                            st.session_state.transcript, 
+                            st.session_state.target_name, 
+                            st.session_state.metadata, 
+                            OPENAI_API_KEY, 
+                            "format_text_highlight_prompt"
+                        )
+
+                with st.spinner("Formatting Report..."):
+                        html = generate_html_report_both(
+                            st.session_state.metadata, 
+                            bullets, 
+                            highlights,
+                            st.session_state.transcript, 
+                            st.session_state.target_name
+                        )
+               
+                
             else:  # transcript_only
                 with st.spinner("Formatting Transcript..."):
                     html = f"<h2>{st.session_state.target_name} Transcript</h2>" + st.session_state.transcript
