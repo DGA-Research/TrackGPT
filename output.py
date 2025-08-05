@@ -1018,6 +1018,27 @@ def generate_html_report_both(
                  except (ValueError, TypeError):
                       # If parsing fails, use the raw value as fallback
                       formatted_date_mdy = str(raw_bullet_date)
+
+            # Escape source and date components BEFORE creating the citation string
+             safe_source = html.escape(source)
+             safe_formatted_date_mdy = html.escape(formatted_date_mdy)
+
+             if url and url != '#':
+                  # Escape URL for the href attribute
+                  safe_url = html.escape(url.replace('"', '"')) # Replace quotes then escape
+                  if not safe_url.startswith(('http://', 'https://')): safe_url = 'http://' + safe_url
+                  # Use the already escaped date for the link text
+                  safe_link_text = safe_formatted_date_mdy
+                  citation = citation = f'[{safe_source}, <a href="{safe_url}" target="_blank" rel="noopener noreferrer"><em>{safe_link_text}</em></a>]'
+             else:
+                  # Use already escaped components
+                  citation = f'[{safe_source}, {safe_formatted_date_mdy}]'
+
+             safe_headline = html.escape(headline)
+             html_parts.append(f"<li>{safe_headline}</li>")
+    else:
+        html_parts.append("<p>No relevant bullets were extracted. Using Highlights</p>")
+    html_parts.append("</div>") # Close bullets-container
      
     
     # --- Bullets Section ---
@@ -1077,27 +1098,6 @@ def generate_html_report_both(
     html_parts.append("</div>") # Close bullets-container
 
 
-             # Escape source and date components BEFORE creating the citation string
-             safe_source = html.escape(source)
-             safe_formatted_date_mdy = html.escape(formatted_date_mdy)
-
-             if url and url != '#':
-                  # Escape URL for the href attribute
-                  safe_url = html.escape(url.replace('"', '"')) # Replace quotes then escape
-                  if not safe_url.startswith(('http://', 'https://')): safe_url = 'http://' + safe_url
-                  # Use the already escaped date for the link text
-                  safe_link_text = safe_formatted_date_mdy
-                  citation = citation = f'[{safe_source}, <a href="{safe_url}" target="_blank" rel="noopener noreferrer"><em>{safe_link_text}</em></a>]'
-             else:
-                  # Use already escaped components
-                  citation = f'[{safe_source}, {safe_formatted_date_mdy}]'
-
-             safe_headline = html.escape(headline)
-             html_parts.append(f"<li>{safe_headline}</li>")
-    else:
-        html_parts.append("<p>No relevant bullets were extracted. Using Highlights</p>")
-    html_parts.append("</div>") # Close bullets-container
-
     # --- Full Transcript Section ---
     html_parts.append("<h3>TRANSCRIPT</h3>")
     safe_transcript = html.escape(transcript_text if transcript_text else "Transcript unavailable.")
@@ -1113,6 +1113,7 @@ def generate_html_report_both(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
     
+
 
 
 
