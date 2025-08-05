@@ -993,6 +993,33 @@ def generate_html_report_both(
         except TypeError:
             html_parts.append(f"<p><strong>Duration:</strong> {html.escape(str(duration_sec))} (raw)</p>")
 
+   # --- Highlights Section ---
+    # (Existing bullet processing logic remains the same)
+    html_parts.append("<h3>HIGHLIGHTS</h3>")
+    html_parts.append("<ul class=\"bullets-list\">")
+    if extracted_highlights_raw:
+        # ... (keep existing loop for processing bullets) ...
+        # Ensure you use html.escape() on headline_raw, body_raw before placing them in HTML
+          for bullet_data in extracted_highlights_raw:
+             logging.debug(f"Processing bullet_data: {bullet_data}")
+             headline = bullet_data.get('headline_raw', 'N/A')
+             # formatted_body = bullet_data.get('body_raw', 'N/A')
+             speaker = bullet_data.get('speaker_raw', 'N/A')
+             source = bullet_data.get('source_raw', 'Unknown Source')
+             # Format date for citation (M/D/YY)
+             raw_bullet_date = bullet_data.get('date_raw')
+             formatted_date_mdy = 'Date Unknown' # Default fallback
+             if raw_bullet_date:
+                 try:
+                     # Assuming date_raw is in YYYYMMDD format
+                     dt_obj_bullet = datetime.strptime(str(raw_bullet_date), "%Y%m%d")
+                     # Use %#m/%#d/%y for Windows to remove leading zeros
+                     formatted_date_mdy = dt_obj_bullet.strftime("%#m/%#d/%y")
+                 except (ValueError, TypeError):
+                      # If parsing fails, use the raw value as fallback
+                      formatted_date_mdy = str(raw_bullet_date)
+     
+    
     # --- Bullets Section ---
     # (Existing bullet processing logic remains the same)
     html_parts.append("<h3>BULLETS</h3>")
@@ -1049,31 +1076,6 @@ def generate_html_report_both(
         html_parts.append("<p>No relevant bullets were extracted. Using Bullets</p>")
     html_parts.append("</div>") # Close bullets-container
 
-    # --- Highlights Section ---
-    # (Existing bullet processing logic remains the same)
-    html_parts.append("<h3>HIGHLIGHTS</h3>")
-    html_parts.append("<ul class=\"bullets-list\">")
-    if extracted_highlights_raw:
-        # ... (keep existing loop for processing bullets) ...
-        # Ensure you use html.escape() on headline_raw, body_raw before placing them in HTML
-          for bullet_data in extracted_highlights_raw:
-             logging.debug(f"Processing bullet_data: {bullet_data}")
-             headline = bullet_data.get('headline_raw', 'N/A')
-             # formatted_body = bullet_data.get('body_raw', 'N/A')
-             speaker = bullet_data.get('speaker_raw', 'N/A')
-             source = bullet_data.get('source_raw', 'Unknown Source')
-             # Format date for citation (M/D/YY)
-             raw_bullet_date = bullet_data.get('date_raw')
-             formatted_date_mdy = 'Date Unknown' # Default fallback
-             if raw_bullet_date:
-                 try:
-                     # Assuming date_raw is in YYYYMMDD format
-                     dt_obj_bullet = datetime.strptime(str(raw_bullet_date), "%Y%m%d")
-                     # Use %#m/%#d/%y for Windows to remove leading zeros
-                     formatted_date_mdy = dt_obj_bullet.strftime("%#m/%#d/%y")
-                 except (ValueError, TypeError):
-                      # If parsing fails, use the raw value as fallback
-                      formatted_date_mdy = str(raw_bullet_date)
 
              # Escape source and date components BEFORE creating the citation string
              safe_source = html.escape(source)
@@ -1111,6 +1113,7 @@ def generate_html_report_both(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
     
+
 
 
 
