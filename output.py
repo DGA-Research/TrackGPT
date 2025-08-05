@@ -878,7 +878,7 @@ def generate_html_report_both(
 
     # --- HTML Boilerplate and CSS ---
     # (Keep existing CSS)
-        html_parts = [
+    html_parts = [
         "<!DOCTYPE html>",
         "<html>",
         "<head>",
@@ -1116,4 +1116,5 @@ def generate_html_report_both(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
     
+
 
