@@ -36,7 +36,7 @@ if check_password():
     from transcriber import transcribe_file
     from analyzer import extract_raw_bullet_data_from_text
     from output import generate_html_report, save_text_file
-    from output import generate_html_report_bullets, generate_docx_report
+    from output import generate_html_report_bullets, generate_docx_report, generate_html_report_both
     
     # UI layout
     st.set_page_config(page_title="TrackGPT", layout="centered")
