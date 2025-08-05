@@ -118,16 +118,16 @@ if check_password():
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            if st.button("Generate with Highlights"):
+            if st.button("Highlights"):
                 st.session_state.report_type = "highlights"
         with col2:
-            if st.button("Generate with Bullets"):
+            if st.button("Bullets"):
                 st.session_state.report_type = "bullets"
         with col3:
             if st.button("Transcript Only"):
                 st.session_state.report_type = "transcript_only"
         with col4:
-            if st.button("Generate with Highlights and Bullets"):
+            if st.button("Highlights and Bullets"):
                 st.session_state.report_type = "both"
         
         # Validate inputs and proceed
