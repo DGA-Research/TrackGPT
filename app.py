@@ -115,7 +115,7 @@ if check_password():
         
         # Report type selection
         st.subheader("Select Report Type:")
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             if st.button("Generate with Highlights"):
