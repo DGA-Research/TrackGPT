@@ -237,6 +237,8 @@ if check_password():
                 # Update transcript with edits
                 transcript = re.sub(r'(\[\d+:\d+:\d+\.\d+\] Speaker [A-Z])', r'</p><p>\1', edited_transcript)
                 transcript = '<p>' + transcript.strip() + '</p>'
+
+                speaker_list = ["Speaker A (Troy)", "Speaker B (Karen Taylor Robeson)"]
                 
                 pattern = r'Speaker\s+([A-Z]):\s+(\w+)'
                 
