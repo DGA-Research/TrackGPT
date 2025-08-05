@@ -194,8 +194,8 @@ if check_password():
                         unique_speakers.add(formatted_speaker)
                     
                     # Convert to sorted list for consistent output
-                    speaker_list = sorted(list(unique_speakers))
-                
+                    speaker_list_text = sorted(list(unique_speakers))
+                    
                     st.session_state.speaker_list = speaker_list
                     st.session_state.speaker_list_text = speaker_list_text
                     st.session_state.transcript = transcript
