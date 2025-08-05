@@ -179,6 +179,7 @@ if check_password():
                     
                     # Use set to automatically handle duplicates
                     unique_speakers = set()
+                    unique_speakers1 = set()
                     
                     # Format each speaker and add to set (duplicates automatically ignored)
                     for speaker_id, name in matches:
@@ -191,10 +192,10 @@ if check_password():
                     # text input
                     for speaker_id, name in matches:
                         formatted_speaker = f"{speaker_id} ({name})"
-                        unique_speakers.add(formatted_speaker)
+                        unique_speakers1.add(formatted_speaker)
                     
                     # Convert to sorted list for consistent output
-                    speaker_list_text = sorted(list(unique_speakers))
+                    speaker_list_text = sorted(list(unique_speakers1))
                     
                     st.session_state.speaker_list = speaker_list
                     st.session_state.speaker_list_text = speaker_list_text
