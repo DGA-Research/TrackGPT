@@ -717,7 +717,7 @@ def generate_html_report_bullets(
 
     # --- Bullets Section ---
     # (Existing bullet processing logic remains the same)
-    html_parts.append("<h2>BULLETS</h2>")
+    html_parts.append("<h3>BULLETS</h3>")
     html_parts.append("<div class=\"bullets-container\">")
     if extracted_bullets_raw:
         # ... (keep existing loop for processing bullets) ...
@@ -773,7 +773,7 @@ def generate_html_report_bullets(
 
     # --- Full Transcript Section ---
     # (Existing transcript logic remains the same)
-    html_parts.append("<h2>TRANSCRIPT</h2>")
+    html_parts.append("<h3>TRANSCRIPT</h3>")
     safe_transcript = html.escape(transcript_text if transcript_text else "Transcript unavailable.")
     # html_parts.append(f"<div class=\"transcript\">{safe_transcript}</div>")
     html_parts.append(transcript_text)
@@ -1000,7 +1000,7 @@ def generate_html_report_both(
 
     # --- Bullets Section ---
     # (Existing bullet processing logic remains the same)
-    html_parts.append("<h2>BULLETS</h2>")
+    html_parts.append("<h3>BULLETS</h3>")
     html_parts.append("<div class=\"bullets-container\">")
     if extracted_bullets_raw:
         # ... (keep existing loop for processing bullets) ...
@@ -1104,7 +1104,7 @@ def generate_html_report_both(
 
     # --- Full Transcript Section ---
     # (Existing transcript logic remains the same)
-    html_parts.append("<h2>TRANSCRIPT</h2>")
+    html_parts.append("<h3>TRANSCRIPT</h3>")
     safe_transcript = html.escape(transcript_text if transcript_text else "Transcript unavailable.")
     # html_parts.append(f"<div class=\"transcript\">{safe_transcript}</div>")
     html_parts.append(transcript_text)
@@ -1116,5 +1116,6 @@ def generate_html_report_both(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
     
+
 
 
