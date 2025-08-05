@@ -182,7 +182,7 @@ if check_password():
                     
                     # Format each speaker and add to set (duplicates automatically ignored)
                     for speaker_id, name in matches:
-                        formatted_speaker = f"{speaker_id}: {name}"
+                        formatted_speaker = f"{speaker_id} ({name})"
                         unique_speakers.add(formatted_speaker)
                     
                     # Convert to sorted list for consistent output
@@ -244,7 +244,7 @@ if check_password():
                 transcript = re.sub(r'(\[\d+:\d+:\d+\.\d+\] Speaker [A-Z])', r'</p><p>\1', edited_transcript)
                 transcript = '<p>' + transcript.strip() + '</p>'
 
-                st.session_state.speaker_list = ["Speaker A (Troy)", "Speaker B (Karrin Taylor Robson)"]
+                # st.session_state.speaker_list = ["Speaker A (Troy)", "Speaker B (Karrin Taylor Robson)"]
                 
                 pattern = r'Speaker\s+([A-Z]):\s+(\w+)'
                 
