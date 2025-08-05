@@ -182,6 +182,14 @@ if check_password():
                     
                     # Format each speaker and add to set (duplicates automatically ignored)
                     for speaker_id, name in matches:
+                        formatted_speaker = f"{speaker_id}: {name}"
+                        unique_speakers.add(formatted_speaker)
+                    
+                    # Convert to sorted list for consistent output
+                    speaker_list = sorted(list(unique_speakers))
+
+                    # text input
+                    for speaker_id, name in matches:
                         formatted_speaker = f"{speaker_id} ({name})"
                         unique_speakers.add(formatted_speaker)
                     
@@ -189,6 +197,7 @@ if check_password():
                     speaker_list = sorted(list(unique_speakers))
                 
                     st.session_state.speaker_list = speaker_list
+                    st.session_state.speaker_list_text = speaker_list_text
                     st.session_state.transcript = transcript
                     st.session_state.step = "edit_transcript"
                     st.rerun()
@@ -222,7 +231,7 @@ if check_password():
         # Confirm Speaker
         speaker_text = ""
         counter = 0
-        for speaker in st.session_state.speaker_list:
+        for speaker in st.session_state.speaker_list_text:
             if counter == 0:
                 speaker_text = speaker
             else:
