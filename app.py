@@ -183,7 +183,7 @@ if check_password():
                     
                     # Format each speaker and add to set (duplicates automatically ignored)
                     for speaker_id, name in matches:
-                        formatted_speaker = f"{speaker_id}: {name}"
+                        formatted_speaker = f"{speaker_id} ({name})"
                         unique_speakers.add(formatted_speaker)
                     
                     # Convert to sorted list for consistent output
@@ -191,7 +191,7 @@ if check_password():
 
                     # text input
                     for speaker_id, name in matches:
-                        formatted_speaker = f"{speaker_id} ({name})"
+                        formatted_speaker = f"{speaker_id}: {name}"
                         unique_speakers1.add(formatted_speaker)
                     
                     # Convert to sorted list for consistent output
