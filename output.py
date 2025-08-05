@@ -789,6 +789,7 @@ def generate_html_report_bullets(
 def generate_html_report_both(
     metadata: Dict[str, Any],
     extracted_bullets_raw: List[Dict[str, Optional[str]]],
+    extracted_highlights_raw: List[Dict[str, Optional[str]]],
     transcript_text: str,
     target_name: str
 ) -> str:
@@ -1113,6 +1114,7 @@ def generate_html_report_both(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
     
+
 
 
 
