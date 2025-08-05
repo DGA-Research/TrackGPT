@@ -978,16 +978,13 @@ def generate_html_report_both(
     # Insert the dynamically generated H1 title
     html_parts.append(f"<h1>{html.escape(report_title)}</h1>")
 
-
     # --- Metadata Section ---
     html_parts.append("<div class=\"meta\">")
-    html_parts.append("<h3>Video Metadata</h3>")
+    # html_parts.append("<h3>Video Metadata</h3>")
     html_parts.append(f"<p><strong>Title:</strong> {html.escape(metadata.get('title', 'N/A'))}</p>")
     html_parts.append(f"<p><strong>Uploader/Channel:</strong> {html.escape(metadata.get('uploader', 'N/A'))}</p>")
     html_parts.append(f"<p><strong>Upload Date:</strong> {display_date}</p>")
     html_parts.append(f"<p><strong>Platform:</strong> {html.escape(metadata.get('extractor', 'N/A'))}</p>")
-    html_parts.append(f"<p><strong>File Type:</strong> {type_input}</p>")
-    
     url = metadata.get('webpage_url', '#')
     html_parts.append(f"<p><strong>URL:</strong> <a href=\"{html.escape(url)}\" target=\"_blank\">{html.escape(url)}</a></p>")
     duration_sec = metadata.get('duration')
@@ -996,7 +993,6 @@ def generate_html_report_both(
             html_parts.append(f"<p><strong>Duration:</strong> {int(duration_sec // 60)}m {int(duration_sec % 60)}s</p>")
         except TypeError:
             html_parts.append(f"<p><strong>Duration:</strong> {html.escape(str(duration_sec))} (raw)</p>")
-    html_parts.append("</div>")
 
     # --- Bullets Section ---
     # (Existing bullet processing logic remains the same)
@@ -1116,6 +1112,7 @@ def generate_html_report_both(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
     
+
 
 
 
