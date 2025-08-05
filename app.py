@@ -115,7 +115,7 @@ if check_password():
         
         # Report type selection
         st.subheader("Select Report Type:")
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
         
         with col1:
             if st.button("Highlights"):
@@ -126,7 +126,7 @@ if check_password():
         with col3:
             if st.button("Transcript Only"):
                 st.session_state.report_type = "transcript_only"
-        with col4:
+        with col1:
             if st.button("Highlights and Bullets"):
                 st.session_state.report_type = "both"
         
