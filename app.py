@@ -185,7 +185,7 @@ if check_password():
                     unique_speakers1 = set()
                     
                     # Format each speaker and add to set (duplicates automatically ignored)
-                    for speaker_id, name in matches:
+                    for name in matches:
                         formatted_speaker = f"{speaker_id} ({name})"
                         unique_speakers.add(formatted_speaker)
                     
