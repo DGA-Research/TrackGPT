@@ -285,9 +285,9 @@ if check_password():
                     print("original speakers", st.session_state.speaker_list)
                     print("edited speakers", speaker_list_edited)
                     for original_speaker, edited_speaker in zip(st.session_state.speaker_list, speaker_list_edited):
-                        transcript = transcript.replace(original_speaker, edited_speaker)
-                        st.write(f"Replaced '{original_speaker}' with '{edited_speaker}'")
-                        st.write(transcript)
+                        transcript = transcript.replace(original_speaker, edited_speaker.strip())
+                        # st.write(f"Replaced '{original_speaker}' with '{edited_speaker}'")
+                        # st.write(transcript)
                     
                     st.session_state.transcript = transcript
                     st.session_state.step = "generate_report"
