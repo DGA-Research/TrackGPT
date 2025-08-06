@@ -263,7 +263,7 @@ if check_password():
                 
                 # Make list of edited speakers
                 matches = re.findall(pattern, edited_speaker)
-                st.write("edited_speakers: " + edited_speaker)
+                # st.write("edited_speakers: " + edited_speaker)
                 
                 # Extract unique speakers while preserving order
                 unique_speakers = []
