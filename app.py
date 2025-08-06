@@ -282,6 +282,8 @@ if check_password():
                     st.error(f"Mismatch: Original has {len(st.session_state.speaker_list)} speakers, edited has {len(speaker_list_edited)} speakers")
                 else:
                     # Replace speaker labels in transcript
+                    print("original speakers", original_speaker)
+                    print("edited speakers", edited_speaker)
                     for original_speaker, edited_speaker in zip(st.session_state.speaker_list, speaker_list_edited):
                         transcript = transcript.replace(original_speaker, edited_speaker)
                         st.write(f"Replaced '{original_speaker}' with '{edited_speaker}'")
