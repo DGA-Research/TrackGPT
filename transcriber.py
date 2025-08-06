@@ -28,7 +28,7 @@ def format_timestamp(ms):
     total_seconds = ms / 1000
     hours = int(total_seconds // 3600)
     minutes = int((total_seconds % 3600) // 60)
-    seconds = total_seconds % 60
+    seconds = int(total_seconds % 60)
     return f"{hours}:{minutes:02}:{seconds:02}"  # Always show HH:MM:SS.ss
 
 
@@ -244,6 +244,7 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
+
 
 
 
