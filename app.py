@@ -279,7 +279,10 @@ if check_password():
                 
                 # Ensure both lists have the same length
                 if len(st.session_state.speaker_list) != len(speaker_list_edited):
-                    st.error(f"Mismatch: Original has {len(st.session_state.speaker_list)} speakers, edited has {len(speaker_list_edited)} speakers")
+                    st.write("Issue with changing speakers. Please manually change the output.")
+                    st.session_state.transcript = transcript
+                    st.session_state.step = "generate_report"
+                    st.rerun()
                 else:
                     # Replace speaker labels in transcript
                     print("original speakers", st.session_state.speaker_list)
