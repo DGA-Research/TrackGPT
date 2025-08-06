@@ -259,7 +259,7 @@ if check_password():
 
                 # st.session_state.speaker_list = ["Speaker A (Troy)", "Speaker B (Karrin Taylor Robson)"]
                 
-                pattern = r'Speaker B:\s+([\s\S]*?)(?=\nSpeaker [A-Z]:|$)'
+                pattern = r'Speaker [A-Z]:\s+([\w\s]+?)(?=Speaker [A-Z]:|$)'
                 
                 # Make list of edited speakers
                 matches = re.findall(pattern, edited_speaker)
