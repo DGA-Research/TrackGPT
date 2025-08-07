@@ -1,2 +1,5 @@
 [server]
 maxUploadSize = 400
+
+[server]
+watchDirs = ["app", "src"]
