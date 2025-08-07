@@ -28,9 +28,8 @@ def check_password():
 
     return False
 
-# Now use it like this
 if check_password():
-    # Import your existing modules directly (no argparse)
+    # Import functions
     from config import Config
     from downloader import download_audio
     from transcriber import transcribe_file
