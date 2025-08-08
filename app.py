@@ -33,7 +33,7 @@ if check_password():
     from config import Config
     from downloader import download_audio
     from transcriber import transcribe_file
-    from analyzer import extract_raw_bullet_data_from_text
+    from analyzer import extract_raw_data_from_text
     from output import generate_html_report, save_text_file, generate_html_report_bullets, generate_docx_report, generate_html_report_both
     
     # UI layout
@@ -312,7 +312,7 @@ if check_password():
             # Call higlight step from analyzer.py
             if st.session_state.report_type == "highlights":
                 with st.spinner("Writing Highlights..."):
-                    bullets = extract_raw_bullet_data_from_text(
+                    bullets = extract_raw_data_from_text(
                         st.session_state.transcript, 
                         st.session_state.target_name, 
                         st.session_state.metadata, 
@@ -332,7 +332,7 @@ if check_password():
             # Call bullet step from analyzer.py
             elif st.session_state.report_type == "bullets":
                 with st.spinner("Writing Bullets..."):
-                    bullets = extract_raw_bullet_data_from_text(
+                    bullets = extract_raw_data_from_text(
                         st.session_state.transcript, 
                         st.session_state.target_name, 
                         st.session_state.metadata, 
@@ -351,7 +351,7 @@ if check_password():
             elif st.session_state.report_type == "both":
                 # # Call bullet step from analyzer.py
                 with st.spinner("Writing Bullets..."):
-                    bullets = extract_raw_bullet_data_from_text(
+                    bullets = extract_raw_data_from_text(
                         st.session_state.transcript, 
                         st.session_state.target_name, 
                         st.session_state.metadata, 
@@ -360,7 +360,7 @@ if check_password():
                     )
                 # Call highlight step from analyzer.py
                 with st.spinner("Writing Highlights..."):
-                        highlights = extract_raw_bullet_data_from_text(
+                        highlights = extract_raw_data_from_text(
                             st.session_state.transcript, 
                             st.session_state.target_name, 
                             st.session_state.metadata, 
