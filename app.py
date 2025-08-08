@@ -34,7 +34,7 @@ if check_password():
     from downloader import download_audio
     from transcriber import transcribe_file
     from analyzer import extract_raw_data_from_text
-    from output import generate_html_report, save_text_file, generate_html_report_bullets, generate_docx_report, generate_html_report_both
+    from output import generate_html_report_highlights, save_text_file, generate_html_report_bullets, generate_docx_report, generate_html_report_both
     
     # UI layout
     st.set_page_config(page_title="TrackGPT", layout="centered")
@@ -322,7 +322,7 @@ if check_password():
 
                 # Format report with function from output.py
                 with st.spinner("Formatting Report..."):
-                    html = generate_html_report(
+                    html = generate_html_report_highlights(
                         st.session_state.metadata, 
                         bullets, 
                         st.session_state.transcript, 
