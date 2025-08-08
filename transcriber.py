@@ -93,11 +93,13 @@ def transcribe_file(audio_file_path, openai_key, assemblyai_key, speaker):
     system_prompt = f"""
         You are a transcription assistant. Given a monologue-style transcript of a conversation or interview, your task is to assign speaker labels (e.g., A, B, C...) and make a guess who is talking (e.g. Speaker A (Barack Obama):). Place the speaker labels before each line as clearly as possible.
 
-        If there are multiple uknown speakers, differentiate them: Speaker A, Speaker B, etc.
+        If there are multiple uknown speakers, differentiate them: Speaker A, Speaker B, etc. 
+            - Correct Example: Speaker A (Unknown A) Speaker D (Unknown B)
+            - Incorrect Example: Speaker A (Unknown) Speaker D (Unknown)
         
         Don't delete anything, just add guesses. Consider the spelling of {speaker}.
 
-        Only add labels — do not rephrase or summarize anything.
+        Only add labels — DO NOT rephrase or summarize anything.
         """
 
     # Create the chat completion using the new OpenAI SDK interface
@@ -245,6 +247,7 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
+
 
 
 
