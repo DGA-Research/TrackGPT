@@ -24,7 +24,7 @@ def check_password():
                 st.session_state["password_correct"] = False
 
     if "password_correct" in st.session_state and not st.session_state["password_correct"]:
-        st.error("😕 Password incorrect")
+        st.error("Incorrect Password")
 
     return False
 
@@ -34,8 +34,7 @@ if check_password():
     from downloader import download_audio
     from transcriber import transcribe_file
     from analyzer import extract_raw_bullet_data_from_text
-    from output import generate_html_report, save_text_file
-    from output import generate_html_report_bullets, generate_docx_report, generate_html_report_both
+    from output import generate_html_report, save_text_file, generate_html_report_bullets, generate_docx_report, generate_html_report_both
     
     # UI layout
     st.set_page_config(page_title="TrackGPT", layout="centered")
@@ -73,15 +72,17 @@ if check_password():
     if st.session_state.step == "input":
         st.header("Step 1: Input Source")
         
-        # Input options
+        # Set input options to false
         type_input = False
         transcript_input = False
         uploaded_file = False
         
         download_button = st.checkbox("Enter my own mp3, m4a or mp4 file")
         if download_button:
+            # Provide link to web compressor
             compress_url = "https://www.freeconvert.com/video-compressor"
             st.markdown(":blue-background[File over 600mb? Compress [here](%s) and then upload!]" % compress_url)
+            # Options for file upload
             uploaded_file_mp3 = st.file_uploader("Upload an mp3 file", type=["mp3"], key="video_file")
             uploaded_file_m4a = st.file_uploader("Upload an m4a file", type=["m4a"], key="video_file2")
             uploaded_file_mp4 = st.file_uploader("Upload an mp4 file", type=["mp4"], key="video_file3")
@@ -92,7 +93,8 @@ if check_password():
             transcript_input = st.text_area("Copy and paste transcript here", key="transcript_input")
             
         video_url = st.text_input("Enter a video or audio URL. See [Supported Sources](%s)" % url)
-        
+
+        # Enter file type (only relevant for bullets)
         type_input = st.selectbox("Enter file type:", ["AUDIO", "VIDEO"])
         
         # Optional metadata
@@ -110,7 +112,7 @@ if check_password():
         
         target_name = st.text_input("Target Name*")
         
-        # Report type selection
+        # Select which type of report
         st.subheader("Select Report Type:")
         col1, col2, col3 = st.columns(3)
         
@@ -168,34 +170,34 @@ if check_password():
                     else:
                         transcript = transcribe_file(audio_str, OPENAI_API_KEY, ASSEMBLYAI_API_KEY, target_name)
                     
-                    # Format transcript for HTML
+                    # Format transcript for HTML and add breaks between each speaker/time stamp
                     transcript = re.sub(r'(\[\d+:\d+:\d+\] Speaker [A-Z])', r'</p><p>\1', transcript)
                     transcript = '<p>' + transcript.strip() + '</p>'
-                   
+                    
+                    # Set pattern used to identify speaker labels 
                     pattern = r'\[[\d:.]+\]\s+(Speaker\s+[A-Z])\s+\(([^)]+)\):'
-    
-                    # Find all matches
                     matches = re.findall(pattern, transcript)
                     
-                    # Use set to automatically handle duplicates
+                    # Create two sets to store a list of speakers in transcript
                     unique_speakers = set()
-                    unique_speakers1 = set()
+                    # Create another set to use as the text for the speaker editor
+                    unique_speakers_edit = set()
                     
-                    # Format each speaker and add to set (duplicates automatically ignored)
+                    # Format each speaker and add to set (duplicates ignored)
                     for speaker_id, name in matches:
                         formatted_speaker = f"{speaker_id} ({name})"
                         unique_speakers.add(formatted_speaker)
                     
-                    # Convert to sorted list for consistent output
+                    # Convert to sorted list so speakers appear in consistent order
                     speaker_list = sorted(list(unique_speakers))
 
-                    # text input
+                    # Format set used for speaker editing
                     for speaker_id, name in matches:
                         formatted_speaker = f"{speaker_id}: {name}"
-                        unique_speakers1.add(formatted_speaker)
+                        unique_speakers_edit.add(formatted_speaker)
                     
-                    # Convert to sorted list for consistent output
-                    speaker_list_text = sorted(list(unique_speakers1))
+                    # Convert to sorted list so speakers appear in consistent order
+                    speaker_list_text = sorted(list(unique_speakers_edit))
                     
                     st.session_state.speaker_list = speaker_list
                     st.session_state.speaker_list_text = speaker_list_text
@@ -222,16 +224,17 @@ if check_password():
         # Show current report type
         st.info(f"Report Type: {st.session_state.report_type.title()}")
         
-        # Edit transcript
+        # Edit Transcript Step for User
         edited_transcript = st.text_area(
             "Edit Transcript:",
             value=st.session_state.transcript.replace('<p>', '').replace('</p>', '\n\n'),
             height=400
         )
 
-        # Confirm Speaker
+        # Confirm Speaker Step for User
         speaker_text = ""
         counter = 0
+        # Format speaker edit text output
         for speaker in st.session_state.speaker_list_text:
             if counter == 0:
                 speaker_text = speaker
@@ -306,6 +309,7 @@ if check_password():
         report_path = output_dir / f"{base_filename}_report.html"
         
         try:
+            # Call higlight step from analyzer.py
             if st.session_state.report_type == "highlights":
                 with st.spinner("Writing Highlights..."):
                     bullets = extract_raw_bullet_data_from_text(
@@ -315,7 +319,8 @@ if check_password():
                         OPENAI_API_KEY, 
                         "format_text_highlight_prompt"
                     )
-                
+
+                # Format report with function from output.py
                 with st.spinner("Formatting Report..."):
                     html = generate_html_report(
                         st.session_state.metadata, 
@@ -323,7 +328,8 @@ if check_password():
                         st.session_state.transcript, 
                         st.session_state.target_name
                     )
-                    
+
+            # Call bullet step from analyzer.py
             elif st.session_state.report_type == "bullets":
                 with st.spinner("Writing Bullets..."):
                     bullets = extract_raw_bullet_data_from_text(
@@ -333,7 +339,7 @@ if check_password():
                         OPENAI_API_KEY, 
                         "format_text_bullet_prompt"
                     )
-                
+                # Format report with function from output.py
                 with st.spinner("Formatting Report..."):
                     html = generate_html_report_bullets(
                         st.session_state.metadata, 
@@ -341,8 +347,9 @@ if check_password():
                         st.session_state.transcript, 
                         st.session_state.target_name
                     )
-                    
+            
             elif st.session_state.report_type == "both":
+                # # Call bullet step from analyzer.py
                 with st.spinner("Writing Bullets..."):
                     bullets = extract_raw_bullet_data_from_text(
                         st.session_state.transcript, 
@@ -351,7 +358,7 @@ if check_password():
                         OPENAI_API_KEY, 
                         "format_text_bullet_prompt"
                     )
-
+                # Call highlight step from analyzer.py
                 with st.spinner("Writing Highlights..."):
                         highlights = extract_raw_bullet_data_from_text(
                             st.session_state.transcript, 
@@ -360,7 +367,7 @@ if check_password():
                             OPENAI_API_KEY, 
                             "format_text_highlight_prompt"
                         )
-
+                # Format report with both bullets and highlights from output.py
                 with st.spinner("Formatting Report..."):
                         html = generate_html_report_both(
                             st.session_state.metadata, 
@@ -375,7 +382,7 @@ if check_password():
                 with st.spinner("Formatting Transcript..."):
                     html = f"<h2>{st.session_state.target_name} Transcript</h2>" + st.session_state.transcript
             
-            # Store results
+            # Store results in session_state
             st.session_state.html_report = html
             save_text_file(html, report_path)
             
@@ -398,7 +405,7 @@ if check_password():
     
     # STEP 4: SHOW RESULTS
     elif st.session_state.step == "show_results":
-        st.success("✅ Analysis complete!")
+        st.success("✅ Report complete!")
         
         # Show the report
         st.markdown(st.session_state.html_report, unsafe_allow_html=True)
