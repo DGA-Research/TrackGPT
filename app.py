@@ -241,9 +241,10 @@ if check_password():
                 speaker_text = speaker_text + "\n" + speaker
             counter += 1
 
+        st.markdown("To edit a speaker, change the name only and do not delete the label")
 
         edited_speaker = st.text_area(
-            "Edit Speakers: (to edit a speaker, change the name only, not the label. For ex: Speaker A: Karen Taylor Robson -> Speaker A: Karrin Taylor Robson",
+            "Edit Speakers:",
             value=speaker_text,
             height=100
         )
