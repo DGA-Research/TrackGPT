@@ -299,7 +299,7 @@ def generate_docx_report(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
 
-def generate_html_report(
+def generate_html_report_highlights(
     metadata: Dict[str, Any],
     extracted_bullets_raw: List[Dict[str, Optional[str]]],
     transcript_text: str,
@@ -785,7 +785,7 @@ def generate_html_report_bullets(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
 
-# NEW FOR BOTH!!
+#  HTML REPORT FOR BOTH HIGHLIGHTS AND BULLETS
 def generate_html_report_both(
     metadata: Dict[str, Any],
     extracted_bullets_raw: List[Dict[str, Optional[str]]],
@@ -1114,6 +1114,7 @@ def generate_html_report_both(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
     
+
 
 
 
