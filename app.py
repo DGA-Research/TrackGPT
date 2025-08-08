@@ -243,7 +243,7 @@ if check_password():
 
 
         edited_speaker = st.text_area(
-            "Edit Speakers:",
+            "Edit Speakers: (to edit a speaker, change the name only, not the label. For ex: Speaker A: Karen Taylor Robson -> Speaker A: Karrin Taylor Robson",
             value=speaker_text,
             height=100
         )
