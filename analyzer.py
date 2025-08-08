@@ -1,19 +1,9 @@
-"""
-Module for analyzing transcripts using OpenAI's API.
-
-Provides two main approaches:
-1. Legacy plain text analysis (legacy_analyze_transcript)
-2. Structured bullet point extraction (extract_raw_bullet_data_from_text)
-
-Both functions handle API retries and error recovery automatically.
-"""
 import logging
 import sys
 import json
 from typing import Optional, List, Dict, Any
 from config import Config
-from prompts import format_text_bullet_prompt
-from prompts import format_text_highlight_prompt
+from prompts import format_text_bullet_prompt, format_text_highlight_prompt
 
 # --- Dependency Checks ---
 try:
@@ -174,7 +164,7 @@ Instructions:
 # - Only retries on rate limits (not general API errors)
 # - Logs each retry attempt via _log_retry_attempt
 # - Re-raises final exception if all retries fail
-def extract_raw_bullet_data_from_text(
+def extract_raw_data_from_text(
     transcript_text: str,
     target_name: str,
     metadata: Dict[str, Any],
@@ -199,8 +189,7 @@ def extract_raw_bullet_data_from_text(
                   This metadata is used to provide context to the LLM and
                   potentially populate source/date fields in the extracted bullets.
         max_bullets: The maximum number of bullet points to attempt to extract.
-        prompt_type: Either highlight or bullet prompt:
-            two options:
+        prompt_type: Direct to either highlight or bullet prompt:
             format_text_bullet_prompt OR format_text_highlight_prompt
 
     Returns:
@@ -332,3 +321,4 @@ def extract_raw_bullet_data_from_text(
         # Catch any other unexpected exceptions during the process
         logging.error(f"Unexpected error during text bullet extraction: {e}", exc_info=True)
         return [] # Return empty list on non-critical failures to allow pipeline to continue
+
