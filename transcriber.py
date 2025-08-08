@@ -7,16 +7,12 @@ import time
 import sys
 from pathlib import Path
 import tempfile
-from typing import List
 import assemblyai as aai
-import openai
 import logging
-import sys
 import json
 from typing import Optional, List, Dict, Any
 from config import Config
 import re
-
 
 logger = logging.getLogger(__name__)
 
@@ -78,14 +74,11 @@ def transcribe_file(audio_file_path, openai_key, assemblyai_key, speaker):
                 chunk_start_time += 30000  # Add 30 seconds
     
     lines1 = "\n".join(lines)
-    print("lines1", lines1)
     
     # Set your OpenAI API key
-    print("set up openai API key")
     client = openai.OpenAI(
         api_key=openai_key)
 
-    print("input your transcript")
     # Input your transcript
     transcript = lines1
 
@@ -102,7 +95,6 @@ def transcribe_file(audio_file_path, openai_key, assemblyai_key, speaker):
         Only add labels — DO NOT rephrase or summarize anything.
         """
 
-    # Create the chat completion using the new OpenAI SDK interface
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -113,6 +105,7 @@ def transcribe_file(audio_file_path, openai_key, assemblyai_key, speaker):
     )
 
     print("RETURNING")
+    # Print statements go in side window in streamlit which can be helpful to see
     print("LABELED TRANSCRIPT BY CHAT", response.choices[0].message.content)
     # return the labeled transcript
     return(response.choices[0].message.content)
@@ -247,6 +240,7 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
+
 
 
 
