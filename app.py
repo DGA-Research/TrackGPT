@@ -74,7 +74,6 @@ if check_password():
         st.header("Step 1: Input Source")
         
         # Input options
-        date_input = False
         type_input = False
         transcript_input = False
         uploaded_file = False
@@ -86,7 +85,6 @@ if check_password():
             uploaded_file_mp3 = st.file_uploader("Upload an mp3 file", type=["mp3"], key="video_file")
             uploaded_file_m4a = st.file_uploader("Upload an m4a file", type=["m4a"], key="video_file2")
             uploaded_file_mp4 = st.file_uploader("Upload an mp4 file", type=["mp4"], key="video_file3")
-            date_input = st.text_input("Enter upload date: (MM/DD/YYYY)")
             uploaded_file = uploaded_file_mp3 or uploaded_file_m4a or uploaded_file_mp4
             
         transcript_button = st.checkbox("Enter my own transcript file")
