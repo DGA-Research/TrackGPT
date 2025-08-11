@@ -61,12 +61,12 @@ TEXT_HIGHLIGHT_PROMPT_TEMPLATE = """# ROLE: Meticulous Communications Analyst & 
    - Bad Example: [Skipping this detail.]
    - Good Example: Brown says it was hard losing his personal identity and professional identity when talking about his recovery process after 2008.
    - Bad Example: [Skipping this detail.]
-12. For the first bullet, use the full {target_name}. For all following bullets, just use the last name. Example:
-   - Mike Duggan says...
-   - Duggan says...
-13. Don't assume a name unless it is explicitly stated in the transcript. Example input: Jackie critisized the president. 
+12. DO NOT assume a name unless it is explicitly stated in the transcript. Example input: Jackie critisized the president. 
    - Good Example: Jackie critisized the president. 
    - Bad Example: Jackie critisized President Trump.
+13. For the first bullet, use the full {target_name}. For all following bullets, just use the last name. Example:
+   - Mike Duggan says...
+   - Duggan says...
     
 # ================== OUTPUT FORMAT (PLAIN TEXT ONLY) ==================
 
@@ -244,3 +244,4 @@ def format_text_bullet_prompt(
         raise ValueError(f"Failed to format Text Bullet prompt due to missing key: {e}")
        
 # --- END OF FILE prompts.py ---
+
