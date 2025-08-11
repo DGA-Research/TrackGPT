@@ -55,9 +55,13 @@ TEXT_HIGHLIGHT_PROMPT_TEMPLATE = """# ROLE: Meticulous Communications Analyst & 
 9. **Be Specific** Give specific highlights that reference exactly what happened in the transcript and provide LOTS of details.
     - Good Example: Duggan says the hate has to be spoken up against, whether it's the assassination attempt on Trump, the attack on the Governor of Pennsylvania, or the attack in Minnesota.
     - Bad Example: Mike Duggan connected the legacy of Vincent Chin to ongoing hate crimes and violence, urging continued public remembrance and action against hate.
-10. Important: DO NOT assume a name unless it is explicitly stated in the transcript!! Example input: Jackie critisized the president. 
+10. Important: DO NOT assume a name unless it is explicitly stated in the transcript!! 
+Example input: Jackie critisized the president. 
    - Good Example: Jackie critisized the president. 
    - Bad Example: Jackie critisized President Trump.
+Example input: I think the candidate for Mayor is a bad choice.
+   - Good Example: Jackie said the mayoral candidate is a bad hoice.
+   - Bad Example: Jackie said that the mayoral candidate Steve Smith is a bad choice.
 11. Don’t rephrase with synonyms unnecessarily: Do not replace speaker’s simple words with synonyms — if they said “killed” do not write “murdered” unless they did.
 12. Include significant background statements on the speaker's close personal connections, even if they are not direct actions. 
    - Good Example: Duggan says his father served with Judge Coffman.
@@ -244,5 +248,6 @@ def format_text_bullet_prompt(
         raise ValueError(f"Failed to format Text Bullet prompt due to missing key: {e}")
        
 # --- END OF FILE prompts.py ---
+
 
 
