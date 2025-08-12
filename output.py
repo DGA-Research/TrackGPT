@@ -387,7 +387,7 @@ def generate_html_report_highlights(
 
     report_title = f"{report_prefix}: {target_name} via {source_context} ({display_date})"
 
-    if html_or_docx == "docx":
+    if html_or_docx == "html":
         # --- HTML Boilerplate and CSS ---
         # (Keep existing CSS)
         html_parts = [
@@ -1114,6 +1114,7 @@ def generate_html_report_both(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
     
+
 
 
 
