@@ -327,7 +327,7 @@ if check_password():
                         bullets, 
                         st.session_state.transcript, 
                         st.session_state.target_name,
-                        docx
+                        "docx"
                     )
 
             # Call bullet step from analyzer.py
