@@ -303,7 +303,8 @@ def generate_html_report_highlights(
     metadata: Dict[str, Any],
     extracted_bullets_raw: List[Dict[str, Optional[str]]],
     transcript_text: str,
-    target_name: str
+    target_name: str,
+    html_or_docx: str
 ) -> str:
     """
     Generates a complete HTML research report based on the extracted data.
@@ -386,107 +387,106 @@ def generate_html_report_highlights(
 
     report_title = f"{report_prefix}: {target_name} via {source_context} ({display_date})"
 
-
-
-    # --- HTML Boilerplate and CSS ---
-    # (Keep existing CSS)
-    html_parts = [
-        "<!DOCTYPE html>",
-        "<html>",
-        "<head>",
-        # Use a distinct <title> for the browser tab vs the <h1> heading
-        f"<title>Report: {target_name} - {source_context} ({display_date})</title>",
-        "<meta charset=\"UTF-8\">",
-        "<style>",
-        """
-        /* Base styles */
-        body {
-            font-family: Arial, sans-serif;
-            font-size: 10pt;
-            line-height: 1.15;
-            margin: 0.5in;
-        }
-        
-        .research-dossier {
-            max-width: 7.5in;
-            margin: 0 auto;
-        }
-        
-        h1 {
-            font-size: 18pt;
-            font-weight: bold;
-            text-align: center;
-            border-bottom: 1px solid #000;
-            padding-bottom: 6pt;
-            margin-bottom: 18pt;
-        }
-        
-        h2 {
-            font-size: 12pt;
-            font-weight: bold;
-            color: white;
-            background-color: black;
-            padding: 4pt 6pt;
-            margin: 24pt 0 12pt 0;
-        }
-        
-        .meta {
-            # background: #f5f5f5;
-            padding: 10px;
-            border-radius: 5px;
-            margin-bottom: 24pt;
-        }
-        
-        .meta p {
-            margin: 4pt 0;
-        }
-        
-        .bullets-list {
-            list-style-type: disc;
-            padding-left: 1.5em;
-            # margin-bottom: 24pt;
-        }
-        
-        .bullets-list li {
-            margin-bottom: 6pt;
-            text-align: justify;
-        }
-        
-        a {
-            color: blue;
-            text-decoration: underline;
-        }
-        
-        a:visited {
-            color: purple;
-        }
-        
-        .timestamp {
-            margin-top: 24pt;
-            padding-top: 6pt;
-            border-top: 1pt solid #ccc;
-            color: #888;
-            font-size: 9pt;
-            text-align: center;
-        }
-        
-        .transcript {
-            white-space: pre-wrap;
-            font-family: monospace;
-            # background-color: #f8f8f8;
-            # padding: 12pt;
-            border: 1px solid #ddd;
-            # margin-top: 4pt; /* Increase space above transcript */
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-        }
-        """,
-        "</style>",
-        "</head>",
-        "<body>",
-        # Use the main class name "research-dossier"
-        "<div class=\"research-dossier\">",
-] # Close the html_parts list definition
+    if html_or_docx == "docx":
+        # --- HTML Boilerplate and CSS ---
+        # (Keep existing CSS)
+        html_parts = [
+            "<!DOCTYPE html>",
+            "<html>",
+            "<head>",
+            # Use a distinct <title> for the browser tab vs the <h1> heading
+            f"<title>Report: {target_name} - {source_context} ({display_date})</title>",
+            "<meta charset=\"UTF-8\">",
+            "<style>",
+            """
+            /* Base styles */
+            body {
+                font-family: Arial, sans-serif;
+                font-size: 10pt;
+                line-height: 1.15;
+                margin: 0.5in;
+            }
+            
+            .research-dossier {
+                max-width: 7.5in;
+                margin: 0 auto;
+            }
+            
+            h1 {
+                font-size: 18pt;
+                font-weight: bold;
+                text-align: center;
+                border-bottom: 1px solid #000;
+                padding-bottom: 6pt;
+                margin-bottom: 18pt;
+            }
+            
+            h2 {
+                font-size: 12pt;
+                font-weight: bold;
+                color: white;
+                background-color: black;
+                padding: 4pt 6pt;
+                margin: 24pt 0 12pt 0;
+            }
+            
+            .meta {
+                # background: #f5f5f5;
+                padding: 10px;
+                border-radius: 5px;
+                margin-bottom: 24pt;
+            }
+            
+            .meta p {
+                margin: 4pt 0;
+            }
+            
+            .bullets-list {
+                list-style-type: disc;
+                padding-left: 1.5em;
+                # margin-bottom: 24pt;
+            }
+            
+            .bullets-list li {
+                margin-bottom: 6pt;
+                text-align: justify;
+            }
+            
+            a {
+                color: blue;
+                text-decoration: underline;
+            }
+            
+            a:visited {
+                color: purple;
+            }
+            
+            .timestamp {
+                margin-top: 24pt;
+                padding-top: 6pt;
+                border-top: 1pt solid #ccc;
+                color: #888;
+                font-size: 9pt;
+                text-align: center;
+            }
+            
+            .transcript {
+                white-space: pre-wrap;
+                font-family: monospace;
+                # background-color: #f8f8f8;
+                # padding: 12pt;
+                border: 1px solid #ddd;
+                # margin-top: 4pt; /* Increase space above transcript */
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+            }
+            """,
+            "</style>",
+            "</head>",
+            "<body>",
+            # Use the main class name "research-dossier"
+            "<div class=\"research-dossier\">",
+    ] # Close the html_parts list definition
     # Insert the dynamically generated H1 title
     html_parts.append(f"<h1>{html.escape(report_title)}</h1>")
 
@@ -1114,6 +1114,7 @@ def generate_html_report_both(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
     
+
 
 
 
