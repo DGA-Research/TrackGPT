@@ -386,6 +386,7 @@ def generate_html_report_highlights(
                  display_date = str(raw_upload_date)
 
     report_title = f"{report_prefix}: {target_name} via {source_context} ({display_date})"
+    html_parts = []
 
     if html_or_docx == "html":
         # --- HTML Boilerplate and CSS ---
@@ -487,6 +488,7 @@ def generate_html_report_highlights(
             # Use the main class name "research-dossier"
             "<div class=\"research-dossier\">",
     ] # Close the html_parts list definition
+        
     # Insert the dynamically generated H1 title
     html_parts.append(f"<h1>{html.escape(report_title)}</h1>")
 
@@ -1114,6 +1116,7 @@ def generate_html_report_both(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
     
+
 
 
 
