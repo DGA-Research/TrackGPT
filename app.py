@@ -294,7 +294,13 @@ if check_password():
                         # st.write(transcript)
 
                     transcript_docx = re.sub(r'<p>', '<br><br>', transcript)
-                    transcript_docx = re.sub(r'\[', '[\u00A0', transcript_docx)  # inserts nbsp
+                    zero_width = "\u200B"  # invisible character
+                    transcript_docx = re.sub(
+                        r'\[(\d{1,2}:\d{2}:\d{2}\])',
+                        f'[{zero_width}\\1',
+                        transcript_docx
+)
+
 
                     st.session_state.transcript_docx = transcript_docx
                     st.session_state.transcript = transcript
