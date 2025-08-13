@@ -1,6 +1,6 @@
 openai>=1.12.0
 python-dotenv>=1.0.0
-yt-dlp>=2023.11.16
+yt-dlp>=2024.04.09
 tenacity>=8.2.3
 pydub
 assemblyai
