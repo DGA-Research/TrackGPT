@@ -368,7 +368,7 @@ if check_password():
                     )
             
             elif st.session_state.report_type == "both":
-                # # Call bullet step from analyzer.py
+                # Call bullet step from analyzer.py
                 with st.spinner("Writing Bullets..."):
                     bullets = extract_raw_data_from_text(
                         st.session_state.transcript, 
