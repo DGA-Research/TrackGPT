@@ -294,7 +294,7 @@ if check_password():
                         # st.write(transcript)
 
                     transcript_docx = re.sub(r'<p>', '<br><br>', transcript)
-                    transcript_docx = re.sub(r'</p>', '<br><br>', transcript_docx)
+                    # transcript_docx = re.sub(r'</p>', '<br><br>', transcript_docx)
 
                     st.session_state.transcript_docx = transcript_docx
                     st.session_state.transcript = transcript
