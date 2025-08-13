@@ -293,10 +293,8 @@ if check_password():
                         # st.write(f"Replaced '{original_speaker}' with '{edited_speaker}'")
                         # st.write(transcript)
 
-                    transcript_docx = re.sub(r'</p>\s*<p>', '\n\n', transcript)  
-                    transcript_docx = re.sub(r'<p>', '', transcript_docx)
-                    transcript_docx = re.sub(r'</p>', '', transcript_docx)
-                    transcript_docx = transcript_docx.strip()
+                    transcript_docx = re.sub(r'<p>', '<br><br>', transcript)
+                    transcript_docx = re.sub(r'</p>', '<br><br>', transcript_docx)
 
                     st.session_state.transcript_docx = transcript_docx
                     st.session_state.transcript = transcript
