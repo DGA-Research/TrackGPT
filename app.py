@@ -452,7 +452,7 @@ if check_password():
             )
         
         with col2:
-            if st.session_state.report_type in ['highlights', 'bullets']:
+            if st.session_state.report_type in ['highlights', 'bullets', 'both']:
                 docx_buffer = html2docx(st.session_state.docx_report, title="Converted Document")
                 st.download_button(
                     label="📝 Download DOCX",
