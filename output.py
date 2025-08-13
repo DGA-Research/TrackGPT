@@ -507,6 +507,7 @@ def generate_report_bullets(
                  display_date = str(raw_upload_date)
 
     report_title = f"{report_prefix}: {target_name} via {source_context} ({display_date})"
+    html_parts = []
 
     if html_or_docx == "html":
         # --- HTML Boilerplate and CSS ---
@@ -726,6 +727,7 @@ def generate_report_both(
                  display_date = str(raw_upload_date)
 
     report_title = f"{report_prefix}: {target_name} via {source_context} ({display_date})"
+    html_parts = []
 
     if html_or_docx == "html":
         # --- HTML Boilerplate and CSS ---
@@ -967,6 +969,7 @@ def generate_report_both(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
     
+
 
 
 
