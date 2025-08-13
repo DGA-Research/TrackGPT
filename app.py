@@ -24,17 +24,19 @@ def check_password():
                 st.session_state["password_correct"] = False
 
     if "password_correct" in st.session_state and not st.session_state["password_correct"]:
-        st.error("Incorrect Password")
+        st.error("😕 Password incorrect")
 
     return False
 
+# Now use it like this
 if check_password():
-    # Import functions
+    # Import your existing modules directly (no argparse)
     from config import Config
     from downloader import download_audio
     from transcriber import transcribe_file
-    from analyzer import extract_raw_data_from_text
-    from output import generate_report_highlights, save_text_file, generate_report_bullets, generate_report_both
+    from analyzer import extract_raw_bullet_data_from_text
+    from output import generate_html_report, save_text_file
+    from output import generate_html_report_bullets, generate_docx_report
     
     # UI layout
     st.set_page_config(page_title="TrackGPT", layout="centered")
@@ -42,439 +44,237 @@ if check_password():
     url = "https://docs.google.com/document/d/1SR45h_w20Vn1-KrCRfAfkf2E2-aDvH-mXu8S2eA4630/edit?usp=sharing"
     st.markdown("Questions? Check out the [TrackGPT Instructions](%s)" % url)
     
-    # Initialize session state
-    if "step" not in st.session_state:
-        st.session_state.step = "input"
-    if "report_type" not in st.session_state:
-        st.session_state.report_type = None
-    if "transcript" not in st.session_state:
-        st.session_state.transcript = ""
-    if "metadata" not in st.session_state:
-        st.session_state.metadata = {}
-    if "target_name" not in st.session_state:
-        st.session_state.target_name = ""
-    if "audio_path" not in st.session_state:
-        st.session_state.audio_path = None
-    
     # Restart button
+    if "processing_done" not in st.session_state:
+        st.session_state["processing_done"] = False
     if st.button("🔄 Restart"):
-        for key in list(st.session_state.keys()):
-            if key != "password_correct":
-                del st.session_state[key]
-        st.session_state.step = "input"
-        st.rerun()
+        st.session_state.clear()
     
     # Set up API keys
-    OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
-    ASSEMBLYAI_API_KEY = st.secrets["ASSEMBLYAI_API_KEY"]
+    OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]  # Access the API key
+    ASSEMBLYAI_API_KEY = st.secrets["ASSEMBLYAI_API_KEY"]  # Access the API key
     
-    # STEP 1: INPUT
-    if st.session_state.step == "input":
-        st.header("Step 1: Input Source")
-        
-        # Set input options to false
-        type_input = False
-        transcript_input = False
-        uploaded_file = False
-        
-        download_button = st.checkbox("Enter my own mp3, m4a or mp4 file")
-        if download_button:
-            # Provide link to web compressor
-            compress_url = "https://www.freeconvert.com/video-compressor"
-            st.markdown(":blue-background[File over 600mb? Compress [here](%s) and then upload!]" % compress_url)
-            # Options for file upload
-            uploaded_file_mp3 = st.file_uploader("Upload an mp3 file", type=["mp3"], key="video_file")
-            uploaded_file_m4a = st.file_uploader("Upload an m4a file", type=["m4a"], key="video_file2")
-            uploaded_file_mp4 = st.file_uploader("Upload an mp4 file", type=["mp4"], key="video_file3")
-            uploaded_file = uploaded_file_mp3 or uploaded_file_m4a or uploaded_file_mp4
-            
-        transcript_button = st.checkbox("Enter my own transcript file")
-        if transcript_button:
-            transcript_input = st.text_area("Copy and paste transcript here", key="transcript_input")
-            
-        video_url = st.text_input("Enter a video or audio URL. See [Supported Sources](%s)" % url)
-
-        # Enter file type (only relevant for bullets)
-        type_input = st.selectbox("Enter file type:", ["AUDIO", "VIDEO"])
-        
-        # Optional metadata
-        title_box = st.checkbox("Enter Title: (optional)")
-        title = st.text_input("Enter Title:") if title_box else "Existing file:"
-        
-        uploader_box = st.checkbox("Enter Uploader/Channel: (optional)")
-        uploader = st.text_input("Enter Uploader/Channel:") if uploader_box else "Unknown (Download Skipped)"
-        
-        upload_date_box = st.checkbox("Enter Upload Date: (optional)")
-        upload_date = st.text_input("Enter Upload Date:") if upload_date_box else "Unknown"
-        
-        platform_box = st.checkbox("Enter Platform: (optional)")
-        platform = st.text_input("Enter Platform:") if platform_box else "Local file"
-        
-        target_name = st.text_input("Target Name*")
-        
-        # Select which type of report
-        st.subheader("Select Report Type:")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("Generate with Highlights"):
-                st.session_state.report_type = "highlights"
-        with col2:
-            if st.button("Generate with Bullets"):
-                st.session_state.report_type = "bullets"
-        with col3:
-            if st.button("Transcript Only"):
-                st.session_state.report_type = "transcript_only"
-        with col1:
-            if st.button("Generate Highlights and Bullets"):
-                st.session_state.report_type = "both"
-        
-        # Validate inputs and proceed
-        if st.session_state.report_type and target_name and (transcript_input or uploaded_file or video_url):
-            # Store data in session state
-            st.session_state.target_name = target_name
-            st.session_state.metadata = {
-                'title': title,
-                'uploader': uploader,
-                'upload_date': upload_date,
-                'webpage_url': "N/A",
-                'extractor': platform,
-                'type_input': type_input
-            }
-            
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
-            base_filename = f"{safe_name}_{timestamp}"
-            output_dir = Path(Config.DEFAULT_OUTPUT_DIR)
-            output_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Process the input
-            with st.spinner("Processing input..."):
-                try:
-                    # Handle different input types
-                    if video_url:
-                        audio_str, metadata_update = download_audio(video_url, output_dir, base_filename, type_input)
-                        st.session_state.metadata.update(metadata_update)
-                        audio_path = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
-                        st.session_state.audio_path = str(audio_path)
-                    elif uploaded_file:
-                        audio_str = uploaded_file
-                        st.session_state.audio_path = uploaded_file
-                    else:
-                        audio_str = None
-                        st.session_state.audio_path = None
-                    
-                    # Get transcript
-                    if transcript_input:
-                        transcript = transcript_input
-                    else:
-                        transcript = transcribe_file(audio_str, OPENAI_API_KEY, ASSEMBLYAI_API_KEY, target_name)
-                    
-                    # Format transcript for HTML and add breaks between each speaker/time stamp
-                    transcript = re.sub(r'(\[\d+:\d+:\d+\] Speaker [A-Z])', r'</p><p>\1', transcript)
-                    transcript = '<p>' + transcript.strip() + '</p>'
-                    
-                    # Set pattern used to identify speaker labels 
-                    pattern = r'\[[\d:.]+\]\s+(Speaker\s+[A-Z])\s+\(([^)]+)\):'
-                    matches = re.findall(pattern, transcript)
-                    
-                    # Create two sets to store a list of speakers in transcript
-                    unique_speakers = set()
-                    # Create another set to use as the text for the speaker editor
-                    unique_speakers_edit = set()
-                    
-                    # Format each speaker and add to set (duplicates ignored)
-                    for speaker_id, name in matches:
-                        formatted_speaker = f"{speaker_id} ({name})"
-                        unique_speakers.add(formatted_speaker)
-                    
-                    # Convert to sorted list so speakers appear in consistent order
-                    speaker_list = sorted(list(unique_speakers))
-
-                    # Format set used for speaker editing
-                    for speaker_id, name in matches:
-                        formatted_speaker = f"{speaker_id}: {name}"
-                        unique_speakers_edit.add(formatted_speaker)
-                    
-                    # Convert to sorted list so speakers appear in consistent order
-                    speaker_list_text = sorted(list(unique_speakers_edit))
-                    
-                    st.session_state.speaker_list = speaker_list
-                    st.session_state.speaker_list_text = speaker_list_text
-                    st.session_state.transcript = transcript
-                    st.session_state.step = "edit_transcript"
-                    st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"Processing failed: {e}")
-        
-        elif st.session_state.report_type and not target_name:
-            st.error("Please enter a Target Name")
-        elif st.session_state.report_type and not (transcript_input or uploaded_file or video_url):
-            st.error("Please provide a transcript, upload a file, or enter a URL")
+    # Input
+    date_input = False
+    type_input = False
+    transcript_input = False
+    uploaded_file = False
+    download_button = st.checkbox("Enter my own mp3, m4a or mp4 file")
+    if download_button:
+        compress_url = "https://www.freeconvert.com/video-compressor"
+        st.markdown(":blue-background[File over 600mb? Compress [here](%s) and then upload!]" % compress_url)
+        uploaded_file_mp3 = st.file_uploader("Upload an mp3 file", type=["mp3"], key="video_file")
+        uploaded_file_m4a = st.file_uploader("Upload an m4a file", type=["m4a"], key="video_file2")
+        uploaded_file_mp4 = st.file_uploader("Upload an mp4 file", type=["mp4"], key="video_file3")
+        # enter date
+        date_input = st.text_input("Enter upload date: (MM/DD/YYYY)")
     
-    # STEP 2: EDIT TRANSCRIPT
-    elif st.session_state.step == "edit_transcript":
-        st.header("Step 2: Review and Edit Transcript")
+        uploaded_file = uploaded_file_mp3 or uploaded_file_m4a or uploaded_file_mp4
         
-        # Show audio player if available
-        if st.session_state.audio_path:
-            st.audio(st.session_state.audio_path)
+    transcript_button = st.checkbox("Enter my own transcript file")
+    if transcript_button:
+        transcript_input = st.text_area("Copy and paste transcript here", key="transcript_input")
+    video_url = st.text_input("Enter a video or audio URL. See [Supported Sources](%s)" % url)
+    # type_input = st.text_input("Enter file type (VIDEO or AUDIO):")
+    type_input = st.selectbox(
+    "Enter file type:",
+    ["AUDIO", "VIDEO"]
+    )
+    title_box = st.checkbox("Enter Title: (optional)")
+    if title_box:
+        title = st.text_input("Enter Title:")
+    uploader_box = st.checkbox("Enter Uploader/Channel: (optional)")
+    if uploader_box:
+        uploader = st.text_input("Enter Uploader/Channel:)")
+    upload_date_box = st.checkbox("Enter Upload Date: (optional)")
+    if upload_date_box:
+        upload_date = st.text_input("Enter Upload Date:")
+    platform_box = st.checkbox("Enter Platform: (optional)")
+    if platform_box:
+        platform = st.text_input("Enter Platform:")
+    target_name = st.text_input("Target Name*")
+    run_highlights = st.button("Generate Tracking Report with Highlights")
+    run_bullets = st.button("Generate Tracking Report with Bullets")
+    transcript_only = st.button("Generate Transcript Only")
+
+    # create metadata
+    if not title_box:
+        title = "Existing file:"
+    if not uploader_box:
+        uploader = "Unknown (Download Skipped)"
+    if not upload_date_box:
+        upload_date = "Unknown"
+    if not platform_box:
+        platform = "Local file"
         
-        # Show current report type
-        st.info(f"Report Type: {st.session_state.report_type.title()}")
-        
-        # Edit Transcript Step for User
-        edited_transcript = st.text_area(
-            "Edit Transcript:",
-            value=st.session_state.transcript.replace('<p>', '').replace('</p>', '\n\n'),
-            height=400
-        )
-
-        # Confirm Speaker Step for User
-        speaker_text = ""
-        counter = 0
-        # Format speaker edit text output
-        for speaker in st.session_state.speaker_list_text:
-            if counter == 0:
-                speaker_text = speaker
-            else:
-                speaker_text = speaker_text + "\n" + speaker
-            counter += 1
-
-        st.markdown("To edit a speaker, change the name only and do not delete the label")
-
-        edited_speaker = st.text_area(
-            "Edit Speakers:",
-            value=speaker_text,
-            height=100
-        )
-
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("Generate Report →"):
-                # Update transcript with edits
-                transcript = re.sub(r'(\[\d+:\d+:\d+\] Speaker [A-Z])', r'</p><p>\1', edited_transcript)
-                transcript = '<p>' + transcript.strip() + '</p>'
-
-                # st.session_state.speaker_list = ["Speaker A (Troy)", "Speaker B (Karrin Taylor Robson)"]
-                
-                pattern = r'Speaker [A-Z]:\s+([\w\s]+?)(?=Speaker [A-Z]:|$)'
-                
-                # Make list of edited speakers
-                matches = re.findall(pattern, edited_speaker)
-                # st.write("edited_speakers: " + edited_speaker)
-                
-                # Extract unique speakers while preserving order
-                unique_speakers = []
-                seen = set()
-                for name in matches:
-                    if name not in seen:
-                        unique_speakers.append(name)
-                        seen.add(name)
-                
-                speaker_list_edited = unique_speakers
-                print("speaker_list_edited:", speaker_list_edited)
-                print("st.session_state.speaker_list:", st.session_state.speaker_list)
-                
-                # Ensure both lists have the same length
-                if len(st.session_state.speaker_list) != len(speaker_list_edited):
-                    st.write("Issue with changing speakers. Please manually change the output.")
-                    st.session_state.transcript = transcript
-                    st.session_state.step = "generate_report"
-                    st.rerun()
-                else:
-                    # Replace speaker labels in transcript
-                    print("original speakers", st.session_state.speaker_list)
-                    print("edited speakers", speaker_list_edited)
-                    for original_speaker, edited_speaker in zip(st.session_state.speaker_list, speaker_list_edited):
-                        transcript = transcript.replace(original_speaker, edited_speaker.strip())
-                        # st.write(f"Replaced '{original_speaker}' with '{edited_speaker}'")
-                        # st.write(transcript)
-
-                    transcript_docx = re.sub(r'<p>', '<br><br>', transcript)
-            
-                    st.session_state.transcript_docx = transcript_docx
-                    st.session_state.transcript = transcript
-                    st.session_state.step = "generate_report"
-                    st.rerun()
     
-    # STEP 3: GENERATE REPORT
-    elif st.session_state.step == "generate_report":
-        st.header("Step 3: Generating Report")
-        
+    if ((run_highlights or run_bullets or transcript_only) and (transcript_input or not transcript_button) and (uploaded_file or video_url or transcript_input)):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_name = "".join(c if c.isalnum() else "_" for c in st.session_state.target_name)
+        safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
         base_filename = f"{safe_name}_{timestamp}"
         output_dir = Path(Config.DEFAULT_OUTPUT_DIR)
         output_dir.mkdir(parents=True, exist_ok=True)
+        transcript_path = output_dir / f"{base_filename}_transcript.txt"
         report_path = output_dir / f"{base_filename}_report.html"
-        
-        try:
-            # Call higlight step from analyzer.py
-            if st.session_state.report_type == "highlights":
-                with st.spinner("Writing Highlights..."):
-                    bullets = extract_raw_data_from_text(
-                        st.session_state.transcript, 
-                        st.session_state.target_name, 
-                        st.session_state.metadata, 
-                        OPENAI_API_KEY, 
-                        "format_text_highlight_prompt"
-                    )
-
-                # Format report with function from output.py
-                with st.spinner("Formatting Report..."):
-                    html = generate_report_highlights(
-                        st.session_state.metadata, 
-                        bullets, 
-                        st.session_state.transcript, 
-                        st.session_state.target_name,
-                        "html"
-                    )
-                    docx = generate_report_highlights(
-                        st.session_state.metadata, 
-                        bullets, 
-                        st.session_state.transcript_docx, 
-                        st.session_state.target_name,
-                        "docx"
-                    )
-
-            # Call bullet step from analyzer.py
-            elif st.session_state.report_type == "bullets":
-                with st.spinner("Writing Bullets..."):
-                    bullets = extract_raw_data_from_text(
-                        st.session_state.transcript, 
-                        st.session_state.target_name, 
-                        st.session_state.metadata, 
-                        OPENAI_API_KEY, 
-                        "format_text_bullet_prompt"
-                    )
-                # Format report with function from output.py
-                with st.spinner("Formatting Report..."):
-                    html = generate_report_bullets(
-                        st.session_state.metadata, 
-                        bullets, 
-                        st.session_state.transcript, 
-                        st.session_state.target_name,
-                        "html"
-                    )
-                    docx = generate_report_bullets(
-                        st.session_state.metadata, 
-                        bullets, 
-                        st.session_state.transcript_docx, 
-                        st.session_state.target_name,
-                        "docx"
-                    )
-            
-            elif st.session_state.report_type == "both":
-                # Call bullet step from analyzer.py
-                with st.spinner("Writing Bullets..."):
-                    bullets = extract_raw_data_from_text(
-                        st.session_state.transcript, 
-                        st.session_state.target_name, 
-                        st.session_state.metadata, 
-                        OPENAI_API_KEY, 
-                        "format_text_bullet_prompt"
-                    )
-                # Call highlight step from analyzer.py
-                with st.spinner("Writing Highlights..."):
-                        highlights = extract_raw_data_from_text(
-                            st.session_state.transcript, 
-                            st.session_state.target_name, 
-                            st.session_state.metadata, 
-                            OPENAI_API_KEY, 
-                            "format_text_highlight_prompt"
-                        )
-                # Format report with both bullets and highlights from output.py
-                with st.spinner("Formatting Report..."):
-                        html = generate_report_both(
-                            st.session_state.metadata, 
-                            bullets, 
-                            highlights,
-                            st.session_state.transcript, 
-                            st.session_state.target_name,
-                            "html"
-                        )
-                        docx = generate_report_both(
-                            st.session_state.metadata, 
-                            bullets, 
-                            highlights,
-                            st.session_state.transcript_docx, 
-                            st.session_state.target_name,
-                            "docx"
-                        )
-               
-                
-            else:  # transcript_only
-                with st.spinner("Formatting Transcript..."):
-                    html = f"<h2>{st.session_state.target_name} Transcript</h2>" + st.session_state.transcript
-                    docx = f"<h2>{st.session_state.target_name} Transcript</h2>" + st.session_state.transcript_docx
-            
-            # Store results in session_state
-            st.session_state.html_report = html
-            save_text_file(html, report_path)
-            st.session_state.docx_report = docx
-            save_text_file(docx, report_path)
-            
-            # Prepare audio download if available
-            if st.session_state.audio_path and isinstance(st.session_state.audio_path, str):
-                try:
-                    with open(st.session_state.audio_path, "rb") as f:
-                        st.session_state.mp3_data = f.read()
-                except:
-                    st.session_state.mp3_data = None
-            
-            st.session_state.step = "show_results"
-            st.rerun()
-            
-        except Exception as e:
-            st.error(f"Report generation failed: {e}")
-            if st.button("← Back to Edit Transcript"):
-                st.session_state.step = "edit_transcript"
-                st.rerun()
     
-    # STEP 4: SHOW RESULTS
-    elif st.session_state.step == "show_results":
-        st.success("✅ Report complete!")
+        metadata = {
+                        'title': title,
+                        'uploader': uploader,
+                        'upload_date': upload_date,
+                        'webpage_url': "N/A",
+                        'extractor': platform,
+                        'type_input': type_input
+                    }
         
-        # Show the report
-        st.markdown(st.session_state.html_report, unsafe_allow_html=True)
+        # Download Step
+        with st.spinner("Downloading..."):
+            # download if user entered a url
+            if video_url:
+                try:
+                    audio_str, metadata = download_audio(video_url, output_dir, base_filename, type_input)
+                    audio_path = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
+                except Exception as e:
+                        st.error(f"Download failed: {e}")
+                        if st.button("🔄 Start Over: Invalid Link. Try Again or Upload File as MP3"):
+                            st.session_state.clear()
+                            str.stop()
+            # if user uploaded a file, download it and set it to the audio path
+            elif uploaded_file:
+                audio_str = uploaded_file
+                audio_path = uploaded_file
+            else:
+                audio_path = "none"
+    
+        # Transcribe Step
+        with st.spinner("Transcribing..."):
+            # transcribe if user does not upload their own file
+            if not transcript_input:
+                try:
+                    transcript = transcribe_file(audio_str, OPENAI_API_KEY, ASSEMBLYAI_API_KEY, target_name)
+                    save_text_file(transcript, transcript_path)
+                except Exception as e:
+                    st.error(f"Transcription failed: {e}")
+                    st.stop()
+            # use input transcription
+            elif transcript_input:
+                try:
+                    transcript = transcript_input
+                    save_text_file(transcript, transcript_path)
+                except Exception as e:
+                    st.error(f"Transcription failed: {e}")
+                    st.stop()
+            # Format transcript for HTML
+            transcript = re.sub(r'(\[\d+:\d+:\d+\] Speaker [A-Z])', r'</p><p>\1', transcript)
+            transcript = '<p>' + transcript.strip() + '</p>'
+            transcript_docx = re.sub(r'(\[\d+:\d+:\d+\] Speaker [A-Z])', r'<br><br>\1', transcript)
+            transcript_docx = '<p>' + transcript_docx.strip() + '</p>'
+            
+        # Highlight/Bullet and Report Step
+        if run_highlights:
+            with st.spinner("Writing Highlights..."):
+            # Analyze
+                try:
+                    type = "format_text_highlight_prompt"
+                    bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY, type)
+                except Exception as e:
+                    bullets = []
+                    st.warning("Bullet extraction failed.")
+    
+            with st.spinner("Formatting Tracking Report..."):
+                # Report
+                try:
+                    html = generate_html_report(metadata, bullets, transcript, target_name)
+                    save_text_file(html, report_path)
+                    docx = generate_docx_report(metadata, bullets, transcript_docx, target_name)
+                    save_text_file(docx, report_path)
+                except Exception as e:
+                        st.error(f"Failed to generate report: {e}")
+                        st.stop()
+        elif run_bullets:
+            with st.spinner("Writing Bullets..."):
+            # Analyze
+                type = "format_text_bullet_prompt"
+                try:
+                    bullets = extract_raw_bullet_data_from_text(transcript, target_name, metadata, OPENAI_API_KEY, type)
+                except Exception as e:
+                    bullets = []
+                    st.warning("Bullet extraction failed.")
+    
+            with st.spinner("Formatting Tracking Report..."):
+                # Report
+                try:
+                    html = generate_html_report_bullets(metadata, bullets, transcript, target_name)
+                    save_text_file(html, report_path)
+                except Exception as e:
+                        st.error(f"Failed to generate report: {e}")
+                        st.stop()
+        elif transcript_only:
+            with st.spinner("Formatting Transcript Output..."):
+                # Report
+                try:
+                    html = f"<h2>{target_name} Transcript</h2>" + transcript
+                    save_text_file(html, report_path)
+                except Exception as e:
+                        st.error(f"Failed to generate report: {e}")
+                        st.stop()
+    
+        # Output
+        st.success("✅ Analysis complete!")
+    
+        # Save HTML and MP3 to session state to survive re-runs
+        st.session_state["html_report"] = html
+        if video_url:
+            try:
+                with open(audio_path, "rb") as f:
+                    mp3_bytes = f.read()
+                st.session_state["mp3_data"] = mp3_bytes
+            except Exception as e:
+                st.warning(f"Could not prepare MP3 download: {e}")
+                st.session_state["mp3_data"] = None
+    
+        # Show HTML report before any buttons (so it doesn’t disappear)
+        st.markdown(st.session_state["html_report"], unsafe_allow_html=True)
+        # st.markdown(st.session_state["docx_report"], unsafe_allow_html=True)
+    
+        # Download buttons (after rendering the report)
+        st.download_button(
+            "📄 Download HTML Report",
+            data=st.session_state["html_report"],
+            file_name=report_path.name,
+            mime="text/html"
+        )
+
+        docx_buffer = html2docx(docx, title="Converted Document")
+        st.download_button(
+            label="Download DOCX",
+            data=docx_buffer.getvalue(),
+            file_name=f"{title} Report.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
         
-        # Download buttons
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
+        if video_url:
             st.download_button(
-                "📄 Download HTML Report",
-                data=st.session_state.html_report,
-                file_name=f"{st.session_state.target_name}_report.html",
-                mime="text/html"
+                "🎵 Download MP3 File",
+                data=st.session_state["mp3_data"],
+                file_name=audio_path.name,
+                mime="audio/mpeg"
             )
+    
+    # Display saved results after report generation
+    elif "html_report" in st.session_state:
+        st.markdown(st.session_state["html_report"], unsafe_allow_html=True)
         
-        with col2:
-            if st.session_state.report_type in ['highlights', 'bullets', 'both', 'transcript_only']:
-                docx_buffer = html2docx(st.session_state.docx_report, title="Converted Document")
-                st.download_button(
-                    label="📝 Download DOCX",
-                    data=docx_buffer.getvalue(),
-                    file_name=f"{st.session_state.target_name}_report.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
-        
-        with col3:
-            if hasattr(st.session_state, 'mp3_data') and st.session_state.mp3_data:
-                st.download_button(
-                    "🎵 Download Audio File",
-                    data=st.session_state.mp3_data,
-                    file_name=f"{st.session_state.target_name}_audio.mp3",
-                    mime="audio/mpeg"
-                )
-        
-        # Option to start over
-        if st.button("🔄 Create Another Report"):
-            for key in list(st.session_state.keys()):
-                if key != "password_correct":
-                    del st.session_state[key]
-            st.session_state.step = "input"
-            st.rerun()
+        st.download_button(
+            "📄 Download HTML Report",
+            data=st.session_state["html_report"],
+            file_name="report.html",
+            mime="text/html"
+        )
+    
+        if "mp3_data" in st.session_state and st.session_state["mp3_data"]:
+            st.download_button(
+                "🎵 Download MP3 File",
+                data=st.session_state["mp3_data"],
+                file_name="audio.mp3",
+                mime="audio/mpeg"
+            )
