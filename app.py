@@ -34,7 +34,7 @@ if check_password():
     from downloader import download_audio
     from transcriber import transcribe_file
     from analyzer import extract_raw_data_from_text
-    from output import generate_html_report_highlights, save_text_file, generate_html_report_bullets, generate_docx_report, generate_html_report_both
+    from output import generate_report_highlights, save_text_file, generate_report_bullets, generate_report_both
     
     # UI layout
     st.set_page_config(page_title="TrackGPT", layout="centered")
@@ -293,10 +293,8 @@ if check_password():
                         # st.write(f"Replaced '{original_speaker}' with '{edited_speaker}'")
                         # st.write(transcript)
 
-                    # transcript_docx = re.sub(r'<p>', '<br><br>', transcript)
-                    transcript_docx = re.sub(r'<p>(.*?)</p>', r'\1<br><br>', transcript, flags=re.DOTALL)
-
-
+                    transcript_docx = re.sub(r'<p>', '<br><br>', transcript)
+            
                     st.session_state.transcript_docx = transcript_docx
                     st.session_state.transcript = transcript
                     st.session_state.step = "generate_report"
@@ -327,14 +325,14 @@ if check_password():
 
                 # Format report with function from output.py
                 with st.spinner("Formatting Report..."):
-                    html = generate_html_report_highlights(
+                    html = generate_report_highlights(
                         st.session_state.metadata, 
                         bullets, 
                         st.session_state.transcript, 
                         st.session_state.target_name,
                         "html"
                     )
-                    docx = generate_html_report_highlights(
+                    docx = generate_report_highlights(
                         st.session_state.metadata, 
                         bullets, 
                         st.session_state.transcript_docx, 
@@ -354,11 +352,19 @@ if check_password():
                     )
                 # Format report with function from output.py
                 with st.spinner("Formatting Report..."):
-                    html = generate_html_report_bullets(
+                    html = generate_report_bullets(
                         st.session_state.metadata, 
                         bullets, 
                         st.session_state.transcript, 
-                        st.session_state.target_name
+                        st.session_state.target_name,
+                        "html"
+                    )
+                    docx = generate_report_bullets(
+                        st.session_state.metadata, 
+                        bullets, 
+                        st.session_state.transcript_docx, 
+                        st.session_state.target_name,
+                        "docx"
                     )
             
             elif st.session_state.report_type == "both":
@@ -382,12 +388,19 @@ if check_password():
                         )
                 # Format report with both bullets and highlights from output.py
                 with st.spinner("Formatting Report..."):
-                        html = generate_html_report_both(
+                        html = generate_report_both(
                             st.session_state.metadata, 
                             bullets, 
                             highlights,
                             st.session_state.transcript, 
                             st.session_state.target_name
+                        )
+                        docx = generate_report_both(
+                            st.session_state.metadata, 
+                            bullets, 
+                            st.session_state.transcript_docx, 
+                            st.session_state.target_name,
+                            "docx"
                         )
                
                 
