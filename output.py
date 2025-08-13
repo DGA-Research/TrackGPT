@@ -237,11 +237,9 @@ def generate_docx_report(
             html_parts.append(f"<p><strong>Duration:</strong> {html.escape(str(duration_sec))} (raw)</p>")
 
     # --- Bullets Section ---
-    # (Existing bullet processing logic remains the same)
     html_parts.append("<h3>HIGHLIGHTS</h3>")
     html_parts.append("<ul class=\"bullets-list\">")
     if extracted_bullets_raw:
-        # ... (keep existing loop for processing bullets) ...
         # Ensure you use html.escape() on headline_raw, body_raw before placing them in HTML
           for bullet_data in extracted_bullets_raw:
              logging.debug(f"Processing bullet_data: {bullet_data}")
@@ -502,11 +500,9 @@ def generate_html_report(
             html_parts.append(f"<p><strong>Duration:</strong> {html.escape(str(duration_sec))} (raw)</p>")
 
     # --- Bullets Section ---
-    # (Existing bullet processing logic remains the same)
     html_parts.append("<h3>HIGHLIGHTS</h3>")
     html_parts.append("<ul class=\"bullets-list\">")
     if extracted_bullets_raw:
-        # ... (keep existing loop for processing bullets) ...
         # Ensure you use html.escape() on headline_raw, body_raw before placing them in HTML
           for bullet_data in extracted_bullets_raw:
              logging.debug(f"Processing bullet_data: {bullet_data}")
@@ -652,7 +648,6 @@ def generate_html_report_bullets(
 
 
     # --- HTML Boilerplate and CSS ---
-    # (Keep existing CSS)
     html_parts = [
         "<!DOCTYPE html>",
         "<html>",
@@ -759,7 +754,6 @@ def generate_html_report_bullets(
     html_parts.append("</div>") # Close bullets-container
 
     # --- Full Transcript Section ---
-    # (Existing transcript logic remains the same)
     html_parts.append("<h2>TRANSCRIPT</h2>")
     safe_transcript = html.escape(transcript_text if transcript_text else "Transcript unavailable.")
     # html_parts.append(f"<div class=\"transcript\">{safe_transcript}</div>")
@@ -771,6 +765,7 @@ def generate_html_report_bullets(
 
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
+
 
 
 
