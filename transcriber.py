@@ -105,7 +105,6 @@ def transcribe_file(audio_file_path, openai_key, assemblyai_key, speaker):
     )
 
     print("RETURNING")
-    # Print statements go in side window in streamlit which can be helpful to see
     print("LABELED TRANSCRIPT BY CHAT", response.choices[0].message.content)
     # return the labeled transcript
     return(response.choices[0].message.content)
@@ -240,11 +239,6 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
-
-
-
-
-
 
 
 
