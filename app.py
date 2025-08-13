@@ -393,11 +393,13 @@ if check_password():
                             bullets, 
                             highlights,
                             st.session_state.transcript, 
-                            st.session_state.target_name
+                            st.session_state.target_name,
+                            "html"
                         )
                         docx = generate_report_both(
                             st.session_state.metadata, 
                             bullets, 
+                            highlights,
                             st.session_state.transcript_docx, 
                             st.session_state.target_name,
                             "docx"
