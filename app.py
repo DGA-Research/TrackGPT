@@ -409,6 +409,7 @@ if check_password():
             else:  # transcript_only
                 with st.spinner("Formatting Transcript..."):
                     html = f"<h2>{st.session_state.target_name} Transcript</h2>" + st.session_state.transcript
+                    docx = f"<h2>{st.session_state.target_name} Transcript</h2>" + st.session_state.transcript_docx
             
             # Store results in session_state
             st.session_state.html_report = html
