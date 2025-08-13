@@ -242,7 +242,7 @@ if check_password():
                 speaker_text = speaker_text + "\n" + speaker
             counter += 1
 
-        st.markdown("To edit a speaker, change the name only and do not delete the label")
+        st.markdown("To edit a speaker, change the name only and do not delete the label. See [Instructions](%s) for more details.")
 
         edited_speaker = st.text_area(
             "Edit Speakers:",
