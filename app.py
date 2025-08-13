@@ -292,6 +292,9 @@ if check_password():
                         transcript = transcript.replace(original_speaker, edited_speaker.strip())
                         # st.write(f"Replaced '{original_speaker}' with '{edited_speaker}'")
                         # st.write(transcript)
+
+                    transcript = re.sub(r'\[\d+:\d+:\d+\]', r'<br><br>\1', transcript)
+                    transcript = '<p>' + transcript.strip() + '</p>'
                     
                     st.session_state.transcript = transcript
                     st.session_state.step = "generate_report"
