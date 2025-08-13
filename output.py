@@ -144,162 +144,8 @@ def save_text_file(content: str, filepath: Path) -> bool:
 save_transcript = save_text_file
 save_analysis = save_text_file
 
-def generate_docx_report(
-    metadata: Dict[str, Any],
-    extracted_bullets_raw: List[Dict[str, Optional[str]]],
-    transcript_text: str,
-    target_name: str
-) -> str:
-    logging.info(f"Generating HTML report for {target_name}...")
-    # print("extracted_bullets_raw", extracted_bullets_raw)
-    # --- Determine Report Title Components ---
-    report_prefix = "Tracking Report" # Or "Analysis", "Research Report", etc.
 
-    # Determine Source Context (Uploader > Platform > Default)
-    uploader = metadata.get('uploader', '').strip()
-    extractor = metadata.get('extractor', '').strip()
-    source_context = "Unknown Source" # Default fallback
-
-    # Get video type
-    type_input = metadata.get('type_input', '').strip()
-    type_input = type_input.upper()
-
-    if uploader and uploader.lower() not in ['unknown uploader', 'n/a', '']:
-        source_context = uploader
-    elif extractor and extractor.lower() not in ['unknown', 'n/a', '']:
-        source_context = extractor.replace('_', ' ').title()
-        if source_context.lower() == 'youtube': source_context = 'YouTube'
-        if source_context.lower() == 'vimeo': source_context = 'Vimeo'
-
-    # Format Date (with robust fallback)
-    raw_upload_date = metadata.get('upload_date')
-    display_date = "Date Unknown" # Fallback
-    if raw_upload_date:
-        try:
-            dt_obj = datetime.strptime(str(raw_upload_date), "%Y%m%d")
-            display_date = dt_obj.strftime("%B %d, %Y")
-        except (ValueError, TypeError):
-             if re.match(r'^\d{8}$', str(raw_upload_date)):
-                 pass
-             else:
-                 display_date = str(raw_upload_date)
-
-    report_title = f"{report_prefix}: {target_name} via {source_context} ({display_date})"
-
-    # --- Determine Report Title Components ---
-    report_prefix = "Tracking Report" # Or "Analysis", "Research Report", etc.
-
-    # Determine Source Context (Uploader > Platform > Default)
-    uploader = metadata.get('uploader', '').strip()
-    extractor = metadata.get('extractor', '').strip()
-    source_context = "Unknown Source" # Default fallback
-
-    if uploader and uploader.lower() not in ['unknown uploader', 'n/a', '']:
-        source_context = uploader
-    elif extractor and extractor.lower() not in ['unknown', 'n/a', '']:
-        source_context = extractor.replace('_', ' ').title()
-        if source_context.lower() == 'youtube': source_context = 'YouTube'
-        if source_context.lower() == 'vimeo': source_context = 'Vimeo'
-
-    # Format Date (with robust fallback)
-    raw_upload_date = metadata.get('upload_date')
-    display_date = "Date Unknown" # Fallback
-    if raw_upload_date:
-        try:
-            dt_obj = datetime.strptime(str(raw_upload_date), "%Y%m%d")
-            display_date = dt_obj.strftime("%B %d, %Y")
-        except (ValueError, TypeError):
-             if re.match(r'^\d{8}$', str(raw_upload_date)):
-                 pass
-             else:
-                 display_date = str(raw_upload_date)
-
-    report_title = f"{report_prefix}: {target_name} via {source_context} ({display_date})"
-
-    # Insert the dynamically generated H1 title
-    html_parts = []
-    html_parts.append(f"<h1>{html.escape(report_title)}</h1>")
-
-    # --- Metadata Section ---
-    html_parts.append("<div class=\"meta\">")
-    # html_parts.append("<h3>Video Metadata</h3>")
-    html_parts.append(f"<p><strong>Title:</strong> {html.escape(metadata.get('title', 'N/A'))}</p>")
-    html_parts.append(f"<p><strong>Uploader/Channel:</strong> {html.escape(metadata.get('uploader', 'N/A'))}</p>")
-    html_parts.append(f"<p><strong>Upload Date:</strong> {display_date}</p>")
-    html_parts.append(f"<p><strong>Platform:</strong> {html.escape(metadata.get('extractor', 'N/A'))}</p>")
-    url = metadata.get('webpage_url', '#')
-    html_parts.append(f"<p><strong>URL:</strong> <a href=\"{html.escape(url)}\" target=\"_blank\">{html.escape(url)}</a></p>")
-    duration_sec = metadata.get('duration')
-    if duration_sec:
-        try:
-            html_parts.append(f"<p><strong>Duration:</strong> {int(duration_sec // 60)}m {int(duration_sec % 60)}s</p>")
-        except TypeError:
-            html_parts.append(f"<p><strong>Duration:</strong> {html.escape(str(duration_sec))} (raw)</p>")
-
-    # --- Bullets Section ---
-    # (Existing bullet processing logic remains the same)
-    html_parts.append("<h3>HIGHLIGHTS</h3>")
-    html_parts.append("<ul class=\"bullets-list\">")
-    if extracted_bullets_raw:
-        # ... (keep existing loop for processing bullets) ...
-        # Ensure you use html.escape() on headline_raw, body_raw before placing them in HTML
-          for bullet_data in extracted_bullets_raw:
-             logging.debug(f"Processing bullet_data: {bullet_data}")
-             headline = bullet_data.get('headline_raw', 'N/A')
-             # formatted_body = bullet_data.get('body_raw', 'N/A')
-             speaker = bullet_data.get('speaker_raw', 'N/A')
-             source = bullet_data.get('source_raw', 'Unknown Source')
-             # Format date for citation (M/D/YY)
-             raw_bullet_date = bullet_data.get('date_raw')
-             formatted_date_mdy = 'Date Unknown' # Default fallback
-             if raw_bullet_date:
-                 try:
-                     # Assuming date_raw is in YYYYMMDD format
-                     dt_obj_bullet = datetime.strptime(str(raw_bullet_date), "%Y%m%d")
-                     # Use %#m/%#d/%y for Windows to remove leading zeros
-                     formatted_date_mdy = dt_obj_bullet.strftime("%#m/%#d/%y")
-                 except (ValueError, TypeError):
-                      # If parsing fails, use the raw value as fallback
-                      formatted_date_mdy = str(raw_bullet_date)
-
-
-             # Escape source and date components BEFORE creating the citation string
-             safe_source = html.escape(source)
-             safe_formatted_date_mdy = html.escape(formatted_date_mdy)
-
-             if url and url != '#':
-                  # Escape URL for the href attribute
-                  safe_url = html.escape(url.replace('"', '"')) # Replace quotes then escape
-                  if not safe_url.startswith(('http://', 'https://')): safe_url = 'http://' + safe_url
-                  # Use the already escaped date for the link text
-                  safe_link_text = safe_formatted_date_mdy
-                  citation = citation = f'[{safe_source}, <a href="{safe_url}" target="_blank" rel="noopener noreferrer"><em>{safe_link_text}</em></a>]'
-             else:
-                  # Use already escaped components
-                  citation = f'[{safe_source}, {safe_formatted_date_mdy}]'
-
-             safe_headline = html.escape(headline)
-             html_parts.append(f"<li>{safe_headline}</li>")
-    else:
-        html_parts.append("<p>No relevant bullets were extracted. Using Highlights</p>")
-    html_parts.append("</div>") # Close bullets-container
-
-    # --- Full Transcript Section ---
-    html_parts.append("<h3>TRANSCRIPT</h3>")
-    safe_transcript = html.escape(transcript_text if transcript_text else "Transcript unavailable.")
-    # html_parts.append(f"<div class=\"transcript\">{safe_transcript}</div>")
-    html_parts.append(transcript_text)  # Already wrapped in <p> tags
-
-
-    # ✅ Moved earlier: transcript is now inside the research-dossier container
-    # --- Closing HTML ---
-    html_parts.append("</div>")  # Close research-dossier
-    html_parts.append("</body></html>")
-
-    logging.info("HTML report string generated.")
-    return "\n".join(html_parts)
-
-def generate_html_report_highlights(
+def generate_report_highlights(
     metadata: Dict[str, Any],
     extracted_bullets_raw: List[Dict[str, Optional[str]]],
     transcript_text: str,
@@ -317,6 +163,7 @@ def generate_html_report_highlights(
         extracted_bullets_raw: List of raw bullet point dictionaries.
         transcript_text: The full transcript text.
         target_name: The research subject name.
+        html_or_docx: Whether to include the html formatting or not
 
     Returns:
         A string containing the complete HTML content of the report.
@@ -572,11 +419,12 @@ def generate_html_report_highlights(
     return "\n".join(html_parts)
 
 
-def generate_html_report_bullets(
+def generate_report_bullets(
     metadata: Dict[str, Any],
     extracted_bullets_raw: List[Dict[str, Optional[str]]],
     transcript_text: str,
-    target_name: str
+    target_name: str,
+    html_or_docx: str
 ) -> str:
     """
     Generates a complete HTML research report based on the extracted data.
@@ -589,6 +437,7 @@ def generate_html_report_bullets(
         extracted_bullets_raw: List of raw bullet point dictionaries.
         transcript_text: The full transcript text.
         target_name: The research subject name.
+        html_or_docx: Whether or not to include html formatting.
 
     Returns:
         A string containing the complete HTML content of the report.
@@ -659,42 +508,42 @@ def generate_html_report_bullets(
 
     report_title = f"{report_prefix}: {target_name} via {source_context} ({display_date})"
 
-
-
-    # --- HTML Boilerplate and CSS ---
-    # (Keep existing CSS)
-    html_parts = [
-        "<!DOCTYPE html>",
-        "<html>",
-        "<head>",
-        # Use a distinct <title> for the browser tab vs the <h1> heading
-        f"<title>Report: {target_name} - {source_context} ({display_date})</title>",
-        "<meta charset=\"UTF-8\">",
-        "<style>",
-        """
-        /* Base styles */
-        body { font-family: Arial, sans-serif; font-size: 10pt; line-height: 1.15; margin: 0.5in; }
-        p { margin: 0 0 6pt 0; }
-        .research-dossier { max-width: 7.5in; margin: 0 auto; } /* Changed class back */
-        h1 { font-size: 18pt; font-weight: bold; text-align: center; border-bottom: 1px solid #000; padding-bottom: 1pt; margin-bottom: 18pt; }
-        h2 { font-size: 12pt; font-weight: bold; color: white; background-color: black; padding: 2pt 4pt; margin: 12pt 0 3pt 0; }
-        .meta { background: #f5f5f5; padding: 10px; border-radius: 5px; margin-bottom: 18pt; }
-        .meta p { margin: 2pt 0; }
-        .bullet { margin: 0 0 6pt 18pt; padding-left: 0; text-indent: 0; text-align: justify; line-height: 1.15; }
-        .bullet p { display: inline; margin: 0; } /* Keep elements on same line */
-        .bullet b { font-weight: bold; }
-        .bullet b::after { content: " "; white-space: pre; }
-        a { color: blue; text-decoration: underline; }
-        a:visited { color: purple; }
-        .timestamp { margin-top: 24pt; padding-top: 6pt; border-top: 1pt solid #ccc; color: #888; font-size: 9pt; text-align: center; }
-        .transcript { white-space: pre-wrap; /* Preserve whitespace */ font-family: monospace; background-color: #f8f8f8; padding: 10px; border: 1px solid #ddd; margin-top: 12pt; word-wrap: break-word; overflow-wrap: break-word; }
-        """,
-        "</style>",
-        "</head>",
-        "<body>",
-        # Use the main class name "research-dossier"
-        "<div class=\"research-dossier\">",
-] # Close the html_parts list definition
+    if html_or_docx == "html":
+        # --- HTML Boilerplate and CSS ---
+        # (Keep existing CSS)
+        html_parts = [
+            "<!DOCTYPE html>",
+            "<html>",
+            "<head>",
+            # Use a distinct <title> for the browser tab vs the <h1> heading
+            f"<title>Report: {target_name} - {source_context} ({display_date})</title>",
+            "<meta charset=\"UTF-8\">",
+            "<style>",
+            """
+            /* Base styles */
+            body { font-family: Arial, sans-serif; font-size: 10pt; line-height: 1.15; margin: 0.5in; }
+            p { margin: 0 0 6pt 0; }
+            .research-dossier { max-width: 7.5in; margin: 0 auto; } /* Changed class back */
+            h1 { font-size: 18pt; font-weight: bold; text-align: center; border-bottom: 1px solid #000; padding-bottom: 1pt; margin-bottom: 18pt; }
+            h2 { font-size: 12pt; font-weight: bold; color: white; background-color: black; padding: 2pt 4pt; margin: 12pt 0 3pt 0; }
+            .meta { background: #f5f5f5; padding: 10px; border-radius: 5px; margin-bottom: 18pt; }
+            .meta p { margin: 2pt 0; }
+            .bullet { margin: 0 0 6pt 18pt; padding-left: 0; text-indent: 0; text-align: justify; line-height: 1.15; }
+            .bullet p { display: inline; margin: 0; } /* Keep elements on same line */
+            .bullet b { font-weight: bold; }
+            .bullet b::after { content: " "; white-space: pre; }
+            a { color: blue; text-decoration: underline; }
+            a:visited { color: purple; }
+            .timestamp { margin-top: 24pt; padding-top: 6pt; border-top: 1pt solid #ccc; color: #888; font-size: 9pt; text-align: center; }
+            .transcript { white-space: pre-wrap; /* Preserve whitespace */ font-family: monospace; background-color: #f8f8f8; padding: 10px; border: 1px solid #ddd; margin-top: 12pt; word-wrap: break-word; overflow-wrap: break-word; }
+            """,
+            "</style>",
+            "</head>",
+            "<body>",
+            # Use the main class name "research-dossier"
+            "<div class=\"research-dossier\">",
+    ] # Close the html_parts list definition
+        
     # Insert the dynamically generated H1 title
     html_parts.append(f"<h1>{html.escape(report_title)}</h1>")
 
@@ -787,13 +636,14 @@ def generate_html_report_bullets(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
 
-#  HTML REPORT FOR BOTH HIGHLIGHTS AND BULLETS
-def generate_html_report_both(
+#  REPORT FOR BOTH HIGHLIGHTS AND BULLETS
+def generate_report_both(
     metadata: Dict[str, Any],
     extracted_bullets_raw: List[Dict[str, Optional[str]]],
     extracted_highlights_raw: List[Dict[str, Optional[str]]],
     transcript_text: str,
-    target_name: str
+    target_name: str,
+    html_or_docx: str
 ) -> str:
     """
     Generates a complete HTML research report based on the extracted data.
@@ -806,6 +656,7 @@ def generate_html_report_both(
         extracted_bullets_raw: List of raw bullet point dictionaries.
         transcript_text: The full transcript text.
         target_name: The research subject name.
+        html_or_docx: Whether or not to include html formatting.
 
     Returns:
         A string containing the complete HTML content of the report.
@@ -876,107 +727,107 @@ def generate_html_report_both(
 
     report_title = f"{report_prefix}: {target_name} via {source_context} ({display_date})"
 
-
-
-    # --- HTML Boilerplate and CSS ---
-    # (Keep existing CSS)
-    html_parts = [
-        "<!DOCTYPE html>",
-        "<html>",
-        "<head>",
-        # Use a distinct <title> for the browser tab vs the <h1> heading
-        f"<title>Report: {target_name} - {source_context} ({display_date})</title>",
-        "<meta charset=\"UTF-8\">",
-        "<style>",
-        """
-        /* Base styles */
-        body {
-            font-family: Arial, sans-serif;
-            font-size: 10pt;
-            line-height: 1.15;
-            margin: 0.5in;
-        }
+    if html_or_docx == "html":
+        # --- HTML Boilerplate and CSS ---
+        # (Keep existing CSS)
+        html_parts = [
+            "<!DOCTYPE html>",
+            "<html>",
+            "<head>",
+            # Use a distinct <title> for the browser tab vs the <h1> heading
+            f"<title>Report: {target_name} - {source_context} ({display_date})</title>",
+            "<meta charset=\"UTF-8\">",
+            "<style>",
+            """
+            /* Base styles */
+            body {
+                font-family: Arial, sans-serif;
+                font-size: 10pt;
+                line-height: 1.15;
+                margin: 0.5in;
+            }
+            
+            .research-dossier {
+                max-width: 7.5in;
+                margin: 0 auto;
+            }
+            
+            h1 {
+                font-size: 18pt;
+                font-weight: bold;
+                text-align: center;
+                border-bottom: 1px solid #000;
+                padding-bottom: 6pt;
+                margin-bottom: 18pt;
+            }
+            
+            h2 {
+                font-size: 12pt;
+                font-weight: bold;
+                color: white;
+                background-color: black;
+                padding: 4pt 6pt;
+                margin: 24pt 0 12pt 0;
+            }
+            
+            .meta {
+                # background: #f5f5f5;
+                padding: 10px;
+                border-radius: 5px;
+                margin-bottom: 24pt;
+            }
+            
+            .meta p {
+                margin: 4pt 0;
+            }
+            
+            .bullets-list {
+                list-style-type: disc;
+                padding-left: 1.5em;
+                # margin-bottom: 24pt;
+            }
+            
+            .bullets-list li {
+                margin-bottom: 6pt;
+                text-align: justify;
+            }
+            
+            a {
+                color: blue;
+                text-decoration: underline;
+            }
+            
+            a:visited {
+                color: purple;
+            }
+            
+            .timestamp {
+                margin-top: 24pt;
+                padding-top: 6pt;
+                border-top: 1pt solid #ccc;
+                color: #888;
+                font-size: 9pt;
+                text-align: center;
+            }
+            
+            .transcript {
+                white-space: pre-wrap;
+                font-family: monospace;
+                # background-color: #f8f8f8;
+                # padding: 12pt;
+                border: 1px solid #ddd;
+                # margin-top: 4pt; /* Increase space above transcript */
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+            }
+            """,
+            "</style>",
+            "</head>",
+            "<body>",
+            # Use the main class name "research-dossier"
+            "<div class=\"research-dossier\">",
+    ] # Close the html_parts list definition
         
-        .research-dossier {
-            max-width: 7.5in;
-            margin: 0 auto;
-        }
-        
-        h1 {
-            font-size: 18pt;
-            font-weight: bold;
-            text-align: center;
-            border-bottom: 1px solid #000;
-            padding-bottom: 6pt;
-            margin-bottom: 18pt;
-        }
-        
-        h2 {
-            font-size: 12pt;
-            font-weight: bold;
-            color: white;
-            background-color: black;
-            padding: 4pt 6pt;
-            margin: 24pt 0 12pt 0;
-        }
-        
-        .meta {
-            # background: #f5f5f5;
-            padding: 10px;
-            border-radius: 5px;
-            margin-bottom: 24pt;
-        }
-        
-        .meta p {
-            margin: 4pt 0;
-        }
-        
-        .bullets-list {
-            list-style-type: disc;
-            padding-left: 1.5em;
-            # margin-bottom: 24pt;
-        }
-        
-        .bullets-list li {
-            margin-bottom: 6pt;
-            text-align: justify;
-        }
-        
-        a {
-            color: blue;
-            text-decoration: underline;
-        }
-        
-        a:visited {
-            color: purple;
-        }
-        
-        .timestamp {
-            margin-top: 24pt;
-            padding-top: 6pt;
-            border-top: 1pt solid #ccc;
-            color: #888;
-            font-size: 9pt;
-            text-align: center;
-        }
-        
-        .transcript {
-            white-space: pre-wrap;
-            font-family: monospace;
-            # background-color: #f8f8f8;
-            # padding: 12pt;
-            border: 1px solid #ddd;
-            # margin-top: 4pt; /* Increase space above transcript */
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-        }
-        """,
-        "</style>",
-        "</head>",
-        "<body>",
-        # Use the main class name "research-dossier"
-        "<div class=\"research-dossier\">",
-] # Close the html_parts list definition
     # Insert the dynamically generated H1 title
     html_parts.append(f"<h1>{html.escape(report_title)}</h1>")
 
@@ -1116,6 +967,7 @@ def generate_html_report_both(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
     
+
 
 
 
