@@ -171,7 +171,8 @@ if check_password():
                         transcript = transcribe_file(audio_str, OPENAI_API_KEY, ASSEMBLYAI_API_KEY, target_name)
                     
                     # Format transcript for HTML and add breaks between each speaker/time stamp
-                    transcript = re.sub(r'(\[\d+:\d+:\d+\] Speaker [A-Z])', r'</p><p>\1', transcript)
+                    # transcript = re.sub(r'(\[\d+:\d+:\d+\] Speaker [A-Z])', r'</p><p>\1', transcript)
+                    transcript = re.sub(r'(\[\d+:\d+:\d+\] Speaker [A-Z])', r'<br><br>\1', transcript)
                     transcript = '<p>' + transcript.strip() + '</p>'
                     
                     # Set pattern used to identify speaker labels 
@@ -293,9 +294,6 @@ if check_password():
                         # st.write(f"Replaced '{original_speaker}' with '{edited_speaker}'")
                         # st.write(transcript)
 
-                    transcript = re.sub(r'\[\d+:\d+:\d+\]', r'<br><br>\1', transcript)
-                    transcript = '<p>' + transcript.strip() + '</p>'
-                    
                     st.session_state.transcript = transcript
                     st.session_state.step = "generate_report"
                     st.rerun()
