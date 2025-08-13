@@ -328,6 +328,13 @@ if check_password():
                         bullets, 
                         st.session_state.transcript, 
                         st.session_state.target_name,
+                        "html"
+                    )
+                    docx = generate_html_report_highlights(
+                        st.session_state.metadata, 
+                        bullets, 
+                        st.session_state.transcript, 
+                        st.session_state.target_name,
                         "docx"
                     )
 
@@ -387,6 +394,8 @@ if check_password():
             # Store results in session_state
             st.session_state.html_report = html
             save_text_file(html, report_path)
+            st.session_state.docx_report = docx
+            save_text_file(docx, report_path)
             
             # Prepare audio download if available
             if st.session_state.audio_path and isinstance(st.session_state.audio_path, str):
@@ -425,7 +434,7 @@ if check_password():
         
         with col2:
             if st.session_state.report_type in ['highlights', 'bullets']:
-                docx_buffer = html2docx(st.session_state.html_report, title="Converted Document")
+                docx_buffer = html2docx(st.session_state.docx_report, title="Converted Document")
                 st.download_button(
                     label="📝 Download DOCX",
                     data=docx_buffer.getvalue(),
