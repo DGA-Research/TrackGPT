@@ -1,5 +1,3 @@
-# --- START OF FILE prompts.py ---
-
 from typing import Dict, Any
 
 TEXT_HIGHLIGHT_PROMPT_TEMPLATE = """# ROLE: Meticulous Communications Analyst & Information Extractor. Follow every rule exactly.
@@ -246,8 +244,6 @@ def format_text_bullet_prompt(
     except KeyError as e:
         logging.error(f"Missing key in Text Bullet prompt formatting: {e}")
         raise ValueError(f"Failed to format Text Bullet prompt due to missing key: {e}")
-       
-# --- END OF FILE prompts.py ---
 
 
 
