@@ -237,7 +237,6 @@ def generate_report_highlights(
 
     if html_or_docx == "html":
         # --- HTML Boilerplate and CSS ---
-        # (Keep existing CSS)
         html_parts = [
             "<!DOCTYPE html>",
             "<html>",
@@ -336,7 +335,6 @@ def generate_report_highlights(
             "<div class=\"research-dossier\">",
     ] # Close the html_parts list definition
         
-    # Insert the dynamically generated H1 title
     html_parts.append(f"<h1>{html.escape(report_title)}</h1>")
 
     # --- Metadata Section ---
@@ -356,11 +354,9 @@ def generate_report_highlights(
             html_parts.append(f"<p><strong>Duration:</strong> {html.escape(str(duration_sec))} (raw)</p>")
 
     # --- Bullets Section ---
-    # (Existing bullet processing logic remains the same)
     html_parts.append("<h3>HIGHLIGHTS</h3>")
     html_parts.append("<ul class=\"bullets-list\">")
     if extracted_bullets_raw:
-        # ... (keep existing loop for processing bullets) ...
         # Ensure you use html.escape() on headline_raw, body_raw before placing them in HTML
           for bullet_data in extracted_bullets_raw:
              logging.debug(f"Processing bullet_data: {bullet_data}")
@@ -380,9 +376,7 @@ def generate_report_highlights(
                  except (ValueError, TypeError):
                       # If parsing fails, use the raw value as fallback
                       formatted_date_mdy = str(raw_bullet_date)
-
-
-             # Escape source and date components BEFORE creating the citation string
+                     
              safe_source = html.escape(source)
              safe_formatted_date_mdy = html.escape(formatted_date_mdy)
 
@@ -409,8 +403,6 @@ def generate_report_highlights(
     # html_parts.append(f"<div class=\"transcript\">{safe_transcript}</div>")
     html_parts.append(transcript_text)  # Already wrapped in <p> tags
 
-
-    # ✅ Moved earlier: transcript is now inside the research-dossier container
     # --- Closing HTML ---
     html_parts.append("</div>")  # Close research-dossier
     html_parts.append("</body></html>")
@@ -510,7 +502,6 @@ def generate_report_bullets(
     html_parts = []
 
     if html_or_docx == "html":
-        # (Keep existing CSS)
         html_parts = [
             "<!DOCTYPE html>",
             "<html>",
@@ -608,8 +599,7 @@ def generate_report_bullets(
             # Use the main class name "research-dossier"
             "<div class=\"research-dossier\">",
     ] # Close the html_parts list definition
-        
-    # Insert the dynamically generated H1 title
+
     html_parts.append(f"<h1>{html.escape(report_title)}</h1>")
 
     # --- Metadata Section ---
@@ -632,12 +622,9 @@ def generate_report_bullets(
     html_parts.append("</div>")
 
     # --- Bullets Section ---
-    # (Existing bullet processing logic remains the same)
     html_parts.append("<h3>BULLETS</h3>")
     html_parts.append("<div class=\"bullets-container\">")
     if extracted_bullets_raw:
-        # ... (keep existing loop for processing bullets) ...
-        # Ensure you use html.escape() on headline_raw, body_raw before placing them in HTML
           for bullet_data in extracted_bullets_raw:
              logging.debug(f"Processing bullet_data: {bullet_data}")
              headline = bullet_data.get('headline_raw', 'N/A')
@@ -656,7 +643,6 @@ def generate_report_bullets(
                  except (ValueError, TypeError):
                       # If parsing fails, use the raw value as fallback
                       formatted_date_mdy = str(raw_bullet_date)
-
 
              # Escape source and date components BEFORE creating the citation string
              safe_source = html.escape(source)
@@ -688,7 +674,6 @@ def generate_report_bullets(
     html_parts.append("</div>") # Close bullets-container
 
     # --- Full Transcript Section ---
-    # (Existing transcript logic remains the same)
     html_parts.append("<h3>TRANSCRIPT</h3>")
     safe_transcript = html.escape(transcript_text if transcript_text else "Transcript unavailable.")
     # html_parts.append(f"<div class=\"transcript\">{safe_transcript}</div>")
@@ -795,7 +780,6 @@ def generate_report_both(
 
     if html_or_docx == "html":
         # --- HTML Boilerplate and CSS ---
-        # (Keep existing CSS)
         html_parts = [
             "<!DOCTYPE html>",
             "<html>",
@@ -894,7 +878,6 @@ def generate_report_both(
             "<div class=\"research-dossier\">",
     ] # Close the html_parts list definition
         
-    # Insert the dynamically generated H1 title
     html_parts.append(f"<h1>{html.escape(report_title)}</h1>")
 
     # --- Metadata Section ---
@@ -918,7 +901,6 @@ def generate_report_both(
     html_parts.append("<h3>HIGHLIGHTS</h3>")
     html_parts.append("<ul class=\"bullets-list\">")
     if extracted_highlights_raw:
-        # ... (keep existing loop for processing bullets) ...
         # Ensure you use html.escape() on headline_raw, body_raw before placing them in HTML
           for bullet_data in extracted_highlights_raw:
              logging.debug(f"Processing bullet_data: {bullet_data}")
@@ -966,7 +948,6 @@ def generate_report_both(
     html_parts.append("<h3>BULLETS</h3>")
     html_parts.append("<div class=\"bullets-container\">")
     if extracted_bullets_raw:
-        # ... (keep existing loop for processing bullets) ...
         # Ensure you use html.escape() on headline_raw, body_raw before placing them in HTML
           for bullet_data in extracted_bullets_raw:
              logging.debug(f"Processing bullet_data: {bullet_data}")
@@ -986,7 +967,6 @@ def generate_report_both(
                  except (ValueError, TypeError):
                       # If parsing fails, use the raw value as fallback
                       formatted_date_mdy = str(raw_bullet_date)
-
 
              # Escape source and date components BEFORE creating the citation string
              safe_source = html.escape(source)
@@ -1023,31 +1003,12 @@ def generate_report_both(
     safe_transcript = html.escape(transcript_text if transcript_text else "Transcript unavailable.")
     # html_parts.append(f"<div class=\"transcript\">{safe_transcript}</div>")
     html_parts.append(transcript_text)  # Already wrapped in <p> tags
-
-
-    # ✅ Moved earlier: transcript is now inside the research-dossier container
+    
     # --- Closing HTML ---
     html_parts.append("</div>")  # Close research-dossier
     html_parts.append("</body></html>")
 
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
