@@ -510,7 +510,6 @@ def generate_report_bullets(
     html_parts = []
 
     if html_or_docx == "html":
-        # --- HTML Boilerplate and CSS ---
         # (Keep existing CSS)
         html_parts = [
             "<!DOCTYPE html>",
@@ -522,21 +521,86 @@ def generate_report_bullets(
             "<style>",
             """
             /* Base styles */
-            body { font-family: Arial, sans-serif; font-size: 10pt; line-height: 1.15; margin: 0.5in; }
-            p { margin: 0 0 6pt 0; }
-            .research-dossier { max-width: 7.5in; margin: 0 auto; } /* Changed class back */
-            h1 { font-size: 18pt; font-weight: bold; text-align: center; border-bottom: 1px solid #000; padding-bottom: 1pt; margin-bottom: 18pt; }
-            h2 { font-size: 12pt; font-weight: bold; color: white; background-color: black; padding: 2pt 4pt; margin: 12pt 0 3pt 0; }
-            .meta { background: #f5f5f5; padding: 10px; border-radius: 5px; margin-bottom: 18pt; }
-            .meta p { margin: 2pt 0; }
-            .bullet { margin: 0 0 6pt 18pt; padding-left: 0; text-indent: 0; text-align: justify; line-height: 1.15; }
-            .bullet p { display: inline; margin: 0; } /* Keep elements on same line */
-            .bullet b { font-weight: bold; }
-            .bullet b::after { content: " "; white-space: pre; }
-            a { color: blue; text-decoration: underline; }
-            a:visited { color: purple; }
-            .timestamp { margin-top: 24pt; padding-top: 6pt; border-top: 1pt solid #ccc; color: #888; font-size: 9pt; text-align: center; }
-            .transcript { white-space: pre-wrap; /* Preserve whitespace */ font-family: monospace; background-color: #f8f8f8; padding: 10px; border: 1px solid #ddd; margin-top: 12pt; word-wrap: break-word; overflow-wrap: break-word; }
+            body {
+                font-family: Arial, sans-serif;
+                font-size: 10pt;
+                line-height: 1.15;
+                margin: 0.5in;
+            }
+            
+            .research-dossier {
+                max-width: 7.5in;
+                margin: 0 auto;
+            }
+            
+            h1 {
+                font-size: 18pt;
+                font-weight: bold;
+                text-align: center;
+                border-bottom: 1px solid #000;
+                padding-bottom: 6pt;
+                margin-bottom: 18pt;
+            }
+            
+            h2 {
+                font-size: 12pt;
+                font-weight: bold;
+                color: white;
+                background-color: black;
+                padding: 4pt 6pt;
+                margin: 24pt 0 12pt 0;
+            }
+            
+            .meta {
+                # background: #f5f5f5;
+                padding: 10px;
+                border-radius: 5px;
+                margin-bottom: 24pt;
+            }
+            
+            .meta p {
+                margin: 4pt 0;
+            }
+            
+            .bullets-list {
+                list-style-type: disc;
+                padding-left: 1.5em;
+                # margin-bottom: 24pt;
+            }
+            
+            .bullets-list li {
+                margin-bottom: 6pt;
+                text-align: justify;
+            }
+            
+            a {
+                color: blue;
+                text-decoration: underline;
+            }
+            
+            a:visited {
+                color: purple;
+            }
+            
+            .timestamp {
+                margin-top: 24pt;
+                padding-top: 6pt;
+                border-top: 1pt solid #ccc;
+                color: #888;
+                font-size: 9pt;
+                text-align: center;
+            }
+            
+            .transcript {
+                white-space: pre-wrap;
+                font-family: monospace;
+                # background-color: #f8f8f8;
+                # padding: 12pt;
+                border: 1px solid #ddd;
+                # margin-top: 4pt; /* Increase space above transcript */
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+            }
             """,
             "</style>",
             "</head>",
@@ -969,6 +1033,7 @@ def generate_report_both(
     logging.info("HTML report string generated.")
     return "\n".join(html_parts)
     
+
 
 
 
