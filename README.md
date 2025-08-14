@@ -515,14 +515,12 @@ IDEAS FOR IMPROVEMENT
 =====================
 Tweaking Prompts:
 - As more DGA employees try out TrackGPT, we will continue to get more feedback.
-- With more feedback and testing, I'm sure the prompts can be improved.
+- With more feedback and testing, I'm sure the analyzer prompts can be improved.
 - There also could be more advanced prompt engineering techniques to be tried out.
-- The bullet prompts are largely untouched from the original, if the research
-Team decides it wants it, there is definitely more time that could be invested in...
+- The bullet prompts are largely untouched from the original, if the research team decides to use the bullets feature, they could definetly be tweaked.
 
 Other API Edits:
 - It would also be interesting to explore how other GPT models perform and play around with temperature more.
-
 
 Downloading YouTube Videos:
 - The feature downloading YouTube videos has not been working great.
