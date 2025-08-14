@@ -50,8 +50,8 @@ TrackGPT/
 ```
 
 
-DETAILED WORKFLOW & USE CASES
-=============================
+DETAILED WORKFLOW 
+=================
 Step-by-Step Process:
 
 1. Authentication & Access Control
