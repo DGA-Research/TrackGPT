@@ -50,32 +50,6 @@ TrackGPT/
 ```
 
 
-ARCHITECTURE
-============
-TrackGPT/
-├── app.py               # Main Streamlit application with multi-step workflow
-├── config.py            # Configuration management with validation
-├── downloader.py        # Audio download functionality using yt-dlp
-├── transcriber.py       # Audio transcription with AssemblyAI integration and OpenAI speaker labeling prompts
-├── analyzer.py          # AI-powered content analysis with retry logic
-├── output.py            # Report generation with HTML/DOCX formatting
-├── prompts.py           # AI prompt templates for highlights and bullets
-├── requirements.txt     # Python dependencies with version specifications
-├── config.toml          # Streamlit configuration for uploads and performance
-└── packages.txt         # System packages (FFmpeg)
-
-Data Flow Architecture:
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌────────────────────┐
-│   Source    │ -> │  Download/  │ -> │ Transcribe  │ -> │ Add Speaker Labels │
-│ (URL/File)  │    │   Upload    │    │ (AssemblyAI)│    │      (OpenAI)      │
-└─────────────┘    └─────────────┘    └─────────────┘    └────────────────────┘
-                                                                      │
-┌───────────────┐    ┌─────────────┐    ┌───────────────────┐    ┌─────────────┐
-│   Export      │ <- │   Format    │ <- │  Write Bullets /  │ <- │ User Edits  │
-│(HTML/DOCX/MP3)│    │   Report    │    │    Highlights     │    │ Transcript  │
-└───────────────┘    └─────────────┘    │     (OpenAI)	    │    └─────────────┘
-				                        └───────────────────┘ 
-
 DETAILED WORKFLOW & USE CASES
 =============================
 Step-by-Step Process:
