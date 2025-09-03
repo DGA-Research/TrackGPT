@@ -55,6 +55,8 @@ if check_password():
         st.session_state.target_name = ""
     if "audio_path" not in st.session_state:
         st.session_state.audio_path = None
+    if "transcript_docx" not in st.session_state:
+      st.session_state.transcript_docx = ""    
     
     # Restart button
     if st.button("🔄 Restart"):
