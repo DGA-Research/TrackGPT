@@ -7,6 +7,15 @@ from docx import Document
 import io
 from html2docx import html2docx
 
+st.caption("Optional: provide YouTube cookies for sign-in/consent/region-locked videos.")
+cookies_file = st.file_uploader("Upload cookies.txt", type=["txt"])
+if cookies_file is not None:
+    cookies_path = Path("cookies.txt").absolute()  # writes to app working dir
+    cookies_path.write_bytes(cookies_file.read())
+    # Make downloader pick it up (Config reads env at import; we set env so your subprocess gets it)
+    os.environ["YTDLP_COOKIES_FILE"] = str(cookies_path)
+    st.success(f"Cookies loaded: {cookies_path}")
+
 def check_password():
     """Returns `True` if the user entered the correct password."""
 
