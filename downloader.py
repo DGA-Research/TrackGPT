@@ -16,6 +16,9 @@ import sys
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 from config import Config
+import urllib.request
+
+
 
 logging.info(
     f"yt-dlp cfg: cookies_file={getattr(Config,'YTDLP_COOKIES_FILE','')!r} "
@@ -29,8 +32,25 @@ try:
 except ImportError:
     print("ERROR: 'yt-dlp' library not found. Install using: pip install yt-dlp", file=sys.stderr)
     sys.exit(1)
+    
+def _download_cookies_to_temp(url: str) -> Optional[str]:
+    try:
+        fd, tmp_path = tempfile.mkstemp(suffix=".cookies.txt")
+        os.close(fd)
+        with urllib.request.urlopen(url, timeout=10) as resp, open(tmp_path, "wb") as out:
+            out.write(resp.read())
+        os.chmod(tmp_path, 0o600)
+        logging.info(f"Fetched cookies from URL into: {tmp_path}")
+        return tmp_path
+    except Exception as e:
+        logging.warning(f"Could not fetch cookies from {url}: {e}")
+        return None
 
-
+cookies_url = os.getenv("YTDLP_COOKIES_URL", getattr(Config, "YTDLP_COOKIES_URL", "") if hasattr(Config, "YTDLP_COOKIES_URL") else "").strip()
+if cookies_url and not orig_cookies_file:
+    fetched = _download_cookies_to_temp(cookies_url)
+    if fetched:
+        orig_cookies_file = fetched
 def find_yt_dlp_executable() -> Optional[str]:
     """
     Locates the yt-dlp executable on the system.
@@ -303,3 +323,4 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         logging.error(f"Last error: {last_err}")
     return None
+
