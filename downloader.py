@@ -174,11 +174,12 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     # -o (--output): Define the output filename template.
         # --- Download Command Construction ---
     # --- Download Command Construction ---
+    # --- Download Command Construction ---
     base_cmd = [
         YT_DLP_PATH,
         url,
-        "-x",                           # extract audio
-        "--audio-format", Config.AUDIO_FORMAT,
+        "-x",
+        "--audio-format", Config.AUDIO_FORMAT,       # mp3 conversion (ffmpeg)
         "--no-playlist",
         "--no-write-info-json",
         "--progress",
@@ -187,88 +188,108 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         "-o", str(output_path_template),
     ]
 
-    # Optional enrichments, only added if present in Config
-    enrichments = []
-    try:
-        if getattr(Config, "YTDLP_USER_AGENT", ""):
-            enrichments += ["--user-agent", Config.YTDLP_USER_AGENT]
+    # Optional enrichments
+    enrich = []
+    ua = getattr(Config, "YTDLP_USER_AGENT", "").strip()
+    if ua:
+        enrich += ["--user-agent", ua, "--add-header", "Accept-Language: en-US,en;q=0.9"]
 
-        # Region/consent
-        if getattr(Config, "YTDLP_GEO_BYPASS", True):
-            enrichments += ["--geo-bypass", "--geo-bypass-country", getattr(Config, "YTDLP_GEO_COUNTRY", "US")]
+    if getattr(Config, "YTDLP_GEO_BYPASS", True):
+        enrich += ["--geo-bypass", "--geo-bypass-country", getattr(Config, "YTDLP_GEO_COUNTRY", "US")]
 
-        # Cookies: prefer file over browser
-        if getattr(Config, "YTDLP_COOKIES_FILE", ""):
-            enrichments += ["--cookies", Config.YTDLP_COOKIES_FILE]
-        elif getattr(Config, "YTDLP_COOKIES_FROM_BROWSER", ""):
-            enrichments += ["--cookies-from-browser", Config.YTDLP_COOKIES_FROM_BROWSER]
-    except Exception:
-        # If Config doesn't have these attributes, just continue with base
-        pass
+    cookies_file = getattr(Config, "YTDLP_COOKIES_FILE", "").strip()
+    cookies_from_browser = getattr(Config, "YTDLP_COOKIES_FROM_BROWSER", "").strip()
+    if cookies_file:
+        enrich += ["--cookies", cookies_file]
+    elif cookies_from_browser:
+        enrich += ["--cookies-from-browser", cookies_from_browser]
 
-    # Prepare attempts: primary (as-is), then fallback with extractor-args if configured
+    extractor_args = getattr(Config, "YTDLP_EXTRACTOR_ARGS", "").strip()
+    retries = int(getattr(Config, "YTDLP_RETRIES", 2))
+
     attempts = []
-    attempts.append(("primary", base_cmd + enrichments))
+    # Attempt A: your original (with enrichments)
+    attempts.append(("primary", base_cmd + enrich))
 
-    extractor_args = getattr(Config, "YTDLP_EXTRACTOR_ARGS", "").strip() if hasattr(Config, "YTDLP_EXTRACTOR_ARGS") else ""
+    # Attempt B: same, but with extractor-args (android client)
     if extractor_args:
         attempts.append(("extractor_args", attempts[0][1] + ["--extractor-args", extractor_args]))
 
-    retries = 0
-    try:
-        retries = int(getattr(Config, "YTDLP_RETRIES", 2))
-    except Exception:
-        retries = 2
+    # Attempt C: avoid post-processing on the download step; fetch bestaudio stream directly (251 or 140),
+    # then we will convert to mp3 ourselves with ffmpeg if needed.
+    fmt_ladder = "251/140/bestaudio/best"
+    ba_cmd = [
+        YT_DLP_PATH, url,
+        "-f", fmt_ladder,
+        "--no-playlist", "--no-write-info-json",
+        "--progress", "--no-simulate", "--no-abort-on-error",
+        "-o", str(output_path_template),
+    ] + enrich
+    attempts.append(("bestaudio_ladder", ba_cmd))
 
-    # Optionally add one more aggressive attempt if retries > 1
-    if retries > 1 and extractor_args:
-        attempts.append(("aggressive", base_cmd + enrichments + ["--extractor-args", extractor_args]))
+    # Helper: convert any downloaded audio to desired mp3 path if necessary
+    def _ensure_mp3(path_in: Path, path_out: Path) -> Optional[str]:
+        try:
+            if path_in.suffix.lower() == f".{Config.AUDIO_FORMAT.lower()}":
+                return str(path_in)
+            # Convert with ffmpeg
+            conv = subprocess.run(
+                [FFMPEG_PATH, "-y", "-i", str(path_in), "-vn", "-acodec", "libmp3lame", "-q:a", "2", str(path_out)],
+                check=True, capture_output=True, text=True, encoding="utf-8"
+            )
+            logging.info(f"ffmpeg stdout:\n{conv.stdout}")
+            if conv.stderr:
+                logging.warning(f"ffmpeg stderr:\n{conv.stderr}")
+            if path_out.exists():
+                return str(path_out)
+        except subprocess.CalledProcessError as e:
+            logging.error(f"ffmpeg failed to convert '{path_in}' → '{path_out}':\n{e.stderr}")
+        except Exception as e:
+            logging.error(f"Unexpected ffmpeg error: {e}", exc_info=True)
+        return None
 
     logging.info(f"Attempting to download audio from: {url}")
-
     last_err = None
-    # Execute up to 1 + retries attempts
+
     for label, cmd in attempts[: 1 + retries]:
         logging.debug(f"[yt-dlp] Attempt '{label}': {' '.join(cmd)}")
         try:
             result = subprocess.run(
-                cmd,
-                check=True,
-                capture_output=True,
-                text=True,
-                encoding='utf-8'
+                cmd, check=True, capture_output=True, text=True, encoding='utf-8'
             )
             logging.info(f"yt-dlp stdout:\n{result.stdout}")
             if result.stderr:
                 logging.warning(f"yt-dlp stderr:\n{result.stderr}")
 
-            # Check expected file
+            # Case 1: expected mp3 already present (primary/extractor_args path)
             if final_audio_path.exists():
-                logging.info(f"Successfully downloaded audio (attempt '{label}') to: {final_audio_path}")
+                logging.info(f"Success ({label}) → {final_audio_path}")
                 return (str(final_audio_path), metadata)
 
-            # Sometimes YouTube yields a different extension (e.g., .webm with Opus)
-            audio_files = list(output_dir.glob(f"{base_filename}.*"))
-            possible_audio = [f for f in audio_files if f.suffix.lower() in ['.mp3', '.m4a', '.wav', '.ogg', '.opus', '.webm']]
-            if possible_audio:
-                found_path = str(possible_audio[0])
-                logging.warning(
-                    f"Expected '{final_audio_path}' not found; returning '{found_path}' instead "
-                    f"(attempt '{label}')."
-                )
-                return (found_path, metadata)
+            # Case 2: bestaudio path(s) — find the file and convert if needed
+            audio_candidates = sorted(output_dir.glob(f"{base_filename}.*"), key=lambda p: p.stat().st_mtime, reverse=True)
+            for cand in audio_candidates:
+                if cand.suffix.lower() in [".mp3", ".m4a", ".webm", ".opus", ".ogg", ".wav"]:
+                    if cand.suffix.lower() == ".mp3":
+                        logging.info(f"Success ({label}) → {cand}")
+                        return (str(cand), metadata)
+                    # Convert to mp3
+                    out = _ensure_mp3(cand, final_audio_path)
+                    if out:
+                        logging.info(f"Success ({label}) + convert → {out}")
+                        return (out, metadata)
 
-            logging.error(f"Attempt '{label}' completed but no output file was produced.")
+            logging.error(f"Attempt '{label}' completed but no usable audio file was produced.")
             last_err = RuntimeError("yt-dlp completed without producing expected output.")
         except subprocess.CalledProcessError as e:
             stderr = e.stderr or ""
-            logging.error(f"yt-dlp failed (Exit Code {e.returncode}) on attempt '{label}'. URL: {url}")
+            logging.error(f"yt-dlp failed (Exit {e.returncode}) on attempt '{label}'. URL: {url}")
             logging.error(f"Command: {' '.join(e.cmd)}")
             logging.error(f"Stderr:\n{stderr}")
             last_err = e
             continue
         except FileNotFoundError:
-            logging.error(f"'{YT_DLP_PATH}' command not found. Is yt-dlp installed and in PATH?")
+            logging.error(f"'{YT_DLP_PATH}' not found. Is yt-dlp installed and on PATH?")
             return None
         except Exception as e:
             logging.error(f"Unexpected error during download (attempt '{label}'): {e}", exc_info=True)
@@ -279,6 +300,3 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         logging.error(f"Last error: {last_err}")
     return None
-
-
-
