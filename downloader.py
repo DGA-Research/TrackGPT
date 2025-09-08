@@ -86,19 +86,21 @@ if not FFMPEG_PATH:
 # --- Core Function ---
 def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -> Optional[Tuple[str, Dict[str, Any]]]:
     """
-    Downloads audio from a given URL using yt-dlp.
-
-    Args:
-        url: The URL of the video or audio source (e.g., YouTube, Vimeo).
-        output_dir: Directory where the downloaded audio file should be saved.
-        base_filename: Base name for the output audio file (without extension).
-        type_input: Arbitrary tag passed into metadata for upstream use.
+    Downloads audio from a given URL using yt-dlp with resilient fallbacks.
 
     Returns:
         (path_to_audio, metadata) if successful; otherwise None.
     """
+    import os, tempfile, shutil, base64
+    import subprocess, logging
+    from typing import Optional, Dict, Any
+
+    # Sanity: yt-dlp + ffmpeg present?
     if not YT_DLP_PATH:
         logging.error("yt-dlp executable not found. Cannot download.")
+        return None
+    if not FFMPEG_PATH:
+        logging.error("ffmpeg not found in PATH. Cannot convert audio.")
         return None
 
     # Ensure output dir exists
@@ -112,35 +114,59 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     output_path_template = output_dir / f"{base_filename}.%(ext)s"
     final_audio_path = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
 
-    # --- Prepare writable cookies (yt-dlp writes back to cookiefile) ---
-    orig_cookies_file = getattr(Config, "YTDLP_COOKIES_FILE", "").strip()
-    cookies_from_browser = getattr(Config, "YTDLP_COOKIES_FROM_BROWSER", "").strip()
-    temp_cookies_file: Optional[str] = None
+    # --- Cookies: prefer Base64 in secrets/env, else file path; ensure writable path for yt-dlp ---
+    # Read env/secrets (env overrides Config at runtime)
+    orig_cookies_file = os.getenv("YTDLP_COOKIES_FILE", getattr(Config, "YTDLP_COOKIES_FILE", "")).strip()
+    cookies_b64 = os.getenv(
+        "YTDLP_COOKIES_B64",
+        getattr(Config, "YTDLP_COOKIES_B64", "") if hasattr(Config, "YTDLP_COOKIES_B64") else ""
+    ).strip()
+    cookies_from_browser = os.getenv(
+        "YTDLP_COOKIES_FROM_BROWSER",
+        getattr(Config, "YTDLP_COOKIES_FROM_BROWSER", "") if hasattr(Config, "YTDLP_COOKIES_FROM_BROWSER") else ""
+    ).strip()
+    user_agent = os.getenv("YTDLP_USER_AGENT", getattr(Config, "YTDLP_USER_AGENT", "")).strip()
 
-    def _prepare_writable_cookies(src_path: str) -> Optional[str]:
-        if not src_path:
-            return None
+    # We'll collect any temp files we create to clean them up later
+    temp_paths_to_cleanup: list[str] = []
+
+    # If B64 is provided, materialize it to a temp file and prefer that
+    if cookies_b64:
         try:
-            fd, tmp_path = tempfile.mkstemp(suffix=".cookies.txt")
+            fd, tmp_path_from_b64 = tempfile.mkstemp(suffix=".cookies.txt")
             os.close(fd)
-            shutil.copyfile(src_path, tmp_path)
-            os.chmod(tmp_path, 0o600)  # ensure only this process can write
-            logging.info(f"Using temp cookies file at: {tmp_path}")
-            return tmp_path
+            with open(tmp_path_from_b64, "wb") as f:
+                f.write(base64.b64decode(cookies_b64))
+            os.chmod(tmp_path_from_b64, 0o600)
+            logging.info(f"Decoded cookies from secrets into: {tmp_path_from_b64}")
+            orig_cookies_file = tmp_path_from_b64
+            temp_paths_to_cleanup.append(tmp_path_from_b64)
         except Exception as e:
-            logging.warning(f"Could not create temp cookies file from '{src_path}': {e}. Continuing without cookies.")
-            return None
+            logging.warning(f"Failed to decode YTDLP_COOKIES_B64: {e}")
 
+    # If we have a cookies file path, copy it to a writable temp file (yt-dlp writes back on close)
+    temp_cookies_file: Optional[str] = None
     if orig_cookies_file:
-        temp_cookies_file = _prepare_writable_cookies(orig_cookies_file)
+        try:
+            fd, tmp_copy = tempfile.mkstemp(suffix=".cookies.txt")
+            os.close(fd)
+            shutil.copyfile(orig_cookies_file, tmp_copy)
+            os.chmod(tmp_copy, 0o600)
+            logging.info(f"Using temp cookies file at: {tmp_copy}")
+            temp_cookies_file = tmp_copy
+            temp_paths_to_cleanup.append(tmp_copy)
+        except Exception as e:
+            logging.warning(f"Could not create temp cookies file from '{orig_cookies_file}': {e}. Continuing without cookies.")
+            temp_cookies_file = None
 
+    # Helper to cleanup temp cookies
     def _cleanup_temp_cookies():
-        if temp_cookies_file:
+        for p in temp_paths_to_cleanup:
             try:
-                os.remove(temp_cookies_file)
-                logging.info(f"Removed temp cookies file: {temp_cookies_file}")
-            except Exception as e:
-                logging.debug(f"Could not remove temp cookies file '{temp_cookies_file}': {e}")
+                os.remove(p)
+                logging.info(f"Removed temp cookies file: {p}")
+            except Exception:
+                pass
 
     # --- Metadata Extraction (no download) ---
     ydl_opts: Dict[str, Any] = {
@@ -148,8 +174,6 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         'no_warnings': True,
         'extract_flat': False,
     }
-
-    user_agent = getattr(Config, "YTDLP_USER_AGENT", "").strip()
     if temp_cookies_file:
         ydl_opts['cookiefile'] = temp_cookies_file
     elif cookies_from_browser:
@@ -184,7 +208,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
             'thumbnail': None,
         }
     except Exception as e:
-        logging.error(f"An unexpected error occurred during metadata extraction for {url}: {e}", exc_info=True)
+        logging.error(f"Unexpected error during metadata extraction for {url}: {e}", exc_info=True)
         _cleanup_temp_cookies()
         return None
 
@@ -217,18 +241,11 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         enrich += ["--cookies-from-browser", cookies_from_browser]
 
     attempts = []
-    # A) Primary (with extraction & conversion)
     attempts.append(("primary", base_cmd + enrich))
+    attempts.append(("tv_embedded", base_cmd + enrich + ["--extractor-args", "youtube:player_client=tv_embedded"]))
+    attempts.append(("web_forced", base_cmd + enrich + ["--extractor-args", "youtube:webpage_download_web=1"]))
 
-    # B) tv_embedded client (avoid PO tokens seen on android/ios)
-    tv_cmd = base_cmd + enrich + ["--extractor-args", "youtube:player_client=tv_embedded"]
-    attempts.append(("tv_embedded", tv_cmd))
-
-    # C) Force web page path
-    web_cmd = base_cmd + enrich + ["--extractor-args", "youtube:webpage_download_web=1"]
-    attempts.append(("web_forced", web_cmd))
-
-    # D) Direct bestaudio ladder; convert locally to mp3 if needed
+    # bestaudio ladder; convert locally if needed
     fmt_ladder = "251/140/bestaudio/best"
     ba_cmd = [
         YT_DLP_PATH, url,
@@ -266,61 +283,59 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     last_err = None
     retries = int(getattr(Config, "YTDLP_RETRIES", 2))
 
-    for label, cmd in attempts[: 1 + retries + 3]:
-        logging.debug(f"[yt-dlp] Attempt '{label}': {' '.join(cmd)}")
-        try:
-            result = subprocess.run(
-                cmd, check=True, capture_output=True, text=True, encoding='utf-8'
-            )
-            logging.info(f"yt-dlp stdout:\n{result.stdout}")
-            if result.stderr:
-                logging.warning(f"yt-dlp stderr:\n{result.stderr}")
+    try:
+        for label, cmd in attempts[: 1 + retries + 3]:
+            logging.debug(f"[yt-dlp] Attempt '{label}': {' '.join(cmd)}")
+            try:
+                result = subprocess.run(
+                    cmd, check=True, capture_output=True, text=True, encoding='utf-8'
+                )
+                logging.info(f"yt-dlp stdout:\n{result.stdout}")
+                if result.stderr:
+                    logging.warning(f"yt-dlp stderr:\n{result.stderr}")
 
-            # Success case 1: final mp3 exists
-            if final_audio_path.exists():
-                logging.info(f"Success ({label}) → {final_audio_path}")
-                _cleanup_temp_cookies()
-                return (str(final_audio_path), {**metadata, "download_attempt": label})
+                # Success case 1: final mp3 exists
+                if final_audio_path.exists():
+                    logging.info(f"Success ({label}) → {final_audio_path}")
+                    return (str(final_audio_path), {**metadata, "download_attempt": label})
 
-            # Success case 2: another audio exists; convert if needed
-            audio_candidates = sorted(
-                output_dir.glob(f"{base_filename}.*"),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True
-            )
-            for cand in audio_candidates:
-                if cand.suffix.lower() in [".mp3", ".m4a", ".webm", ".opus", ".ogg", ".wav"]:
-                    if cand.suffix.lower() == ".mp3":
-                        logging.info(f"Success ({label}) → {cand}")
-                        _cleanup_temp_cookies()
-                        return (str(cand), {**metadata, "download_attempt": label})
-                    out = _ensure_mp3(cand, final_audio_path)
-                    if out:
-                        logging.info(f"Success ({label}) + convert → {out}")
-                        _cleanup_temp_cookies()
-                        return (out, {**metadata, "download_attempt": label})
+                # Success case 2: another audio exists; convert if needed
+                audio_candidates = sorted(
+                    output_dir.glob(f"{base_filename}.*"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True
+                )
+                for cand in audio_candidates:
+                    if cand.suffix.lower() in [".mp3", ".m4a", ".webm", ".opus", ".ogg", ".wav"]:
+                        if cand.suffix.lower() == ".mp3":
+                            logging.info(f"Success ({label}) → {cand}")
+                            return (str(cand), {**metadata, "download_attempt": label})
+                        out = _ensure_mp3(cand, final_audio_path)
+                        if out:
+                            logging.info(f"Success ({label}) + convert → {out}")
+                            return (out, {**metadata, "download_attempt": label})
 
-            logging.error(f"Attempt '{label}' completed but no usable audio file was produced.")
-            last_err = RuntimeError("yt-dlp completed without producing expected output.")
-        except subprocess.CalledProcessError as e:
-            stderr = e.stderr or ""
-            logging.error(f"yt-dlp failed (Exit {e.returncode}) on attempt '{label}'. URL: {url}")
-            logging.error(f"Command: {' '.join(e.cmd)}")
-            logging.error(f"Stderr:\n{stderr}")
-            last_err = e
-            continue
-        except FileNotFoundError:
-            logging.error(f"'{YT_DLP_PATH}' not found. Is yt-dlp installed and in PATH?")
-            _cleanup_temp_cookies()
-            return None
-        except Exception as e:
-            logging.error(f"Unexpected error during download (attempt '{label}'): {e}", exc_info=True)
-            last_err = e
-            continue
+                logging.error(f"Attempt '{label}' completed but no usable audio file was produced.")
+                last_err = RuntimeError("yt-dlp completed without producing expected output.")
+            except subprocess.CalledProcessError as e:
+                stderr = e.stderr or ""
+                logging.error(f"yt-dlp failed (Exit {e.returncode}) on attempt '{label}'. URL: {url}")
+                logging.error(f"Command: {' '.join(e.cmd)}")
+                logging.error(f"Stderr:\n{stderr}")
+                last_err = e
+                continue
+            except FileNotFoundError:
+                logging.error(f"'{YT_DLP_PATH}' not found. Is yt-dlp installed and in PATH?")
+                return None
+            except Exception as e:
+                logging.error(f"Unexpected error during download (attempt '{label}'): {e}", exc_info=True)
+                last_err = e
+                continue
+    finally:
+        # Always cleanup temp cookies we created
+        _cleanup_temp_cookies()
 
-    _cleanup_temp_cookies()
     logging.error("All yt-dlp attempts failed.")
-    if last_err:
-        logging.error(f"Last error: {last_err}")
-    return None
+    if last_e_
+
 
