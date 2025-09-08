@@ -1,5 +1,7 @@
 import streamlit as st
 from pathlib import Path
+import os
+import streamlit as st
 from datetime import datetime
 import re
 import hmac
@@ -7,12 +9,15 @@ from docx import Document
 import io
 from html2docx import html2docx
 
+
 st.caption("Optional: provide YouTube cookies for sign-in/consent/region-locked videos.")
 cookies_file = st.file_uploader("Upload cookies.txt", type=["txt"])
 if cookies_file is not None:
-    cookies_path = Path("cookies.txt").absolute()  # writes to app working dir
+    # Save to a writable path
+    cookies_path = Path("cookies.txt").absolute()
     cookies_path.write_bytes(cookies_file.read())
-    # Make downloader pick it up (Config reads env at import; we set env so your subprocess gets it)
+    os.chmod(cookies_path, 0o600)
+    # Let downloader pick it up (downloader uses Config/env to add --cookies)
     os.environ["YTDLP_COOKIES_FILE"] = str(cookies_path)
     st.success(f"Cookies loaded: {cookies_path}")
 
