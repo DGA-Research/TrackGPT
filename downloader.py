@@ -172,27 +172,24 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     # --no-simulate: Ensure the actual download happens.
     # --no-abort-on-error: Attempt to continue if parts of the download fail.
     # -o (--output): Define the output filename template.
-        # --- Download Command Construction ---
     # --- Download Command Construction ---
     # --- Download Command Construction ---
     base_cmd = [
-        YT_DLP_PATH,
-        url,
+        YT_DLP_PATH, url,
         "-x",
-        "--audio-format", Config.AUDIO_FORMAT,       # mp3 conversion (ffmpeg)
-        "--no-playlist",
-        "--no-write-info-json",
-        "--progress",
-        "--no-simulate",
-        "--no-abort-on-error",
+        "--audio-format", Config.AUDIO_FORMAT,
+        "--no-playlist", "--no-write-info-json",
+        "--progress", "--no-simulate", "--no-abort-on-error",
         "-o", str(output_path_template),
+        "--force-ipv4",  # often helps on container hosts
     ]
 
     # Optional enrichments
     enrich = []
     ua = getattr(Config, "YTDLP_USER_AGENT", "").strip()
     if ua:
-        enrich += ["--user-agent", ua, "--add-header", "Accept-Language: en-US,en;q=0.9"]
+        enrich += ["--user-agent", ua, "--add-header", "Accept-Language: en-US,en;q=0.9",
+                   "--add-header", "Referer: https://www.youtube.com/"]
 
     if getattr(Config, "YTDLP_GEO_BYPASS", True):
         enrich += ["--geo-bypass", "--geo-bypass-country", getattr(Config, "YTDLP_GEO_COUNTRY", "US")]
@@ -204,19 +201,23 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     elif cookies_from_browser:
         enrich += ["--cookies-from-browser", cookies_from_browser]
 
-    extractor_args = getattr(Config, "YTDLP_EXTRACTOR_ARGS", "").strip()
-    retries = int(getattr(Config, "YTDLP_RETRIES", 2))
-
+    # Attempt A: original (with enrichments)
     attempts = []
-    # Attempt A: your original (with enrichments)
     attempts.append(("primary", base_cmd + enrich))
 
-    # Attempt B: same, but with extractor-args (android client)
-    if extractor_args:
-        attempts.append(("extractor_args", attempts[0][1] + ["--extractor-args", extractor_args]))
+    # Attempt B: tv_embedded client (no PO token)
+    tv_cmd = base_cmd + enrich + ["--extractor-args", "youtube:player_client=tv_embedded,player_skip=webpage,client_location=US"]
+    attempts.append(("tv_embedded", tv_cmd))
 
-    # Attempt C: avoid post-processing on the download step; fetch bestaudio stream directly (251 or 140),
-    # then we will convert to mp3 ourselves with ffmpeg if needed.
+    # Attempt C: ios client (no PO token)
+    ios_cmd = base_cmd + enrich + ["--extractor-args", "youtube:player_client=ios,client_location=US"]
+    attempts.append(("ios_client", ios_cmd))
+
+    # Attempt D: force web path (some hosts need explicit webpage download)
+    web_cmd = base_cmd + enrich + ["--extractor-args", "youtube:webpage_download_web=1,client_location=US"]
+    attempts.append(("web_forced", web_cmd))
+
+    # Attempt E: direct bestaudio ladder; convert with ffmpeg if needed
     fmt_ladder = "251/140/bestaudio/best"
     ba_cmd = [
         YT_DLP_PATH, url,
@@ -224,17 +225,18 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         "--no-playlist", "--no-write-info-json",
         "--progress", "--no-simulate", "--no-abort-on-error",
         "-o", str(output_path_template),
+        "--force-ipv4",
     ] + enrich
     attempts.append(("bestaudio_ladder", ba_cmd))
 
-    # Helper: convert any downloaded audio to desired mp3 path if necessary
+    # Converter
     def _ensure_mp3(path_in: Path, path_out: Path) -> Optional[str]:
         try:
             if path_in.suffix.lower() == f".{Config.AUDIO_FORMAT.lower()}":
                 return str(path_in)
-            # Convert with ffmpeg
             conv = subprocess.run(
-                [FFMPEG_PATH, "-y", "-i", str(path_in), "-vn", "-acodec", "libmp3lame", "-q:a", "2", str(path_out)],
+                [FFMPEG_PATH, "-y", "-i", str(path_in), "-vn",
+                 "-acodec", "libmp3lame", "-q:a", "2", str(path_out)],
                 check=True, capture_output=True, text=True, encoding="utf-8"
             )
             logging.info(f"ffmpeg stdout:\n{conv.stdout}")
@@ -243,15 +245,16 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
             if path_out.exists():
                 return str(path_out)
         except subprocess.CalledProcessError as e:
-            logging.error(f"ffmpeg failed to convert '{path_in}' → '{path_out}':\n{e.stderr}")
+            logging.error(f"ffmpeg failed: {e.stderr}")
         except Exception as e:
-            logging.error(f"Unexpected ffmpeg error: {e}", exc_info=True)
+            logging.error(f"ffmpeg unexpected error: {e}", exc_info=True)
         return None
 
     logging.info(f"Attempting to download audio from: {url}")
-    last_err = None
 
-    for label, cmd in attempts[: 1 + retries]:
+    last_err = None
+    retries = int(getattr(Config, "YTDLP_RETRIES", 2))
+    for label, cmd in attempts[: 1 + retries + 3]:  # allow us to hit the laddered clients
         logging.debug(f"[yt-dlp] Attempt '{label}': {' '.join(cmd)}")
         try:
             result = subprocess.run(
@@ -261,19 +264,21 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
             if result.stderr:
                 logging.warning(f"yt-dlp stderr:\n{result.stderr}")
 
-            # Case 1: expected mp3 already present (primary/extractor_args path)
+            # mp3 already?
             if final_audio_path.exists():
                 logging.info(f"Success ({label}) → {final_audio_path}")
                 return (str(final_audio_path), metadata)
 
-            # Case 2: bestaudio path(s) — find the file and convert if needed
-            audio_candidates = sorted(output_dir.glob(f"{base_filename}.*"), key=lambda p: p.stat().st_mtime, reverse=True)
+            # check other audio, convert if needed
+            audio_candidates = sorted(
+                output_dir.glob(f"{base_filename}.*"),
+                key=lambda p: p.stat().st_mtime, reverse=True
+            )
             for cand in audio_candidates:
                 if cand.suffix.lower() in [".mp3", ".m4a", ".webm", ".opus", ".ogg", ".wav"]:
                     if cand.suffix.lower() == ".mp3":
                         logging.info(f"Success ({label}) → {cand}")
                         return (str(cand), metadata)
-                    # Convert to mp3
                     out = _ensure_mp3(cand, final_audio_path)
                     if out:
                         logging.info(f"Success ({label}) + convert → {out}")
