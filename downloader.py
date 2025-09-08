@@ -15,6 +15,9 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 from config import Config
 
+logging.info(f"yt-dlp cfg: extractor_args={getattr(Config, 'YTDLP_EXTRACTOR_ARGS', '')!r} cookies_file={getattr(Config, 'YTDLP_COOKIES_FILE', '')!r} ua_set={bool(getattr(Config, 'YTDLP_USER_AGENT', ''))}")
+
+
 # --- Dependency Checks ---
 try:
     import yt_dlp
@@ -276,5 +279,6 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         logging.error(f"Last error: {last_err}")
     return None
+
 
 
