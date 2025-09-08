@@ -46,23 +46,12 @@ class Config:
     DEFAULT_OUTPUT_DIR: str = _get_secret_or_env("OUTPUT_DIR", "output")
 
     # --- NEW: yt-dlp hardening (all optional) ---
-    # Provide either a cookies file or a browser profile (prefer file).
-    YTDLP_COOKIES_FILE: str = _get_secret_or_env("YTDLP_COOKIES_FILE", "").strip()      # e.g., "C:/path/cookies.txt" or "/app/cookies.txt"
-    YTDLP_COOKIES_FROM_BROWSER: str = _get_secret_or_env("YTDLP_COOKIES_FROM_BROWSER", "").strip()  # e.g., "chrome:Default", "edge", "firefox:default-release"
-
-    # Some sites behave better with an explicit UA.
-    YTDLP_USER_AGENT: str = _get_secret_or_env("YTDLP_USER_AGENT", "").strip()
-
-    # Try different YouTube client to bypass throttling/403s.
-    # Common choice: "youtube:player_client=android"
-    YTDLP_EXTRACTOR_ARGS: str = _get_secret_or_env("YTDLP_EXTRACTOR_ARGS", "").strip()
-
-    # Region/consent issues:
-    YTDLP_GEO_BYPASS: bool = _get_bool_secret_or_env("YTDLP_GEO_BYPASS", True)
-    YTDLP_GEO_COUNTRY: str = _get_secret_or_env("YTDLP_GEO_COUNTRY", "US").strip()
-
-    # How many fallback attempts to try (primary + N extra)
-    YTDLP_RETRIES: int = int(_get_secret_or_env("YTDLP_RETRIES", "2"))
+    YTDLP_COOKIES_FILE: str = os.getenv("YTDLP_COOKIES_FILE", "").strip()
+    YTDLP_COOKIES_FROM_BROWSER: str = os.getenv("YTDLP_COOKIES_FROM_BROWSER", "").strip()
+    YTDLP_USER_AGENT: str = os.getenv("YTDLP_USER_AGENT", "").strip()
+    YTDLP_GEO_BYPASS: bool = os.getenv("YTDLP_GEO_BYPASS", "true").lower() in {"1","true","yes"}
+    YTDLP_GEO_COUNTRY: str = os.getenv("YTDLP_GEO_COUNTRY", "US").strip()
+    YTDLP_RETRIES: int = int(os.getenv("YTDLP_RETRIES", "3"))
 
     @classmethod
     def validate(cls) -> None:
@@ -86,3 +75,4 @@ try:
 except ConfigError as e:
     print(str(e), file=sys.stderr)
     sys.exit(1)
+
