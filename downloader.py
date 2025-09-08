@@ -170,6 +170,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     # --no-abort-on-error: Attempt to continue if parts of the download fail.
     # -o (--output): Define the output filename template.
         # --- Download Command Construction ---
+    # --- Download Command Construction ---
     base_cmd = [
         YT_DLP_PATH,
         url,
@@ -276,48 +277,4 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         logging.error(f"Last error: {last_err}")
     return None
 
-        # Log the standard output and standard error from the yt-dlp process
-        logging.info(f"yt-dlp stdout:\n{result.stdout}")
-        if result.stderr:
-            logging.warning(f"yt-dlp stderr:\n{result.stderr}")
-
-        # Verify if the expected final audio file exists after the download
-        if final_audio_path.exists():
-            logging.info(f"Successfully downloaded audio to: {final_audio_path}")
-            # Return the path to the downloaded file and the extracted metadata
-            return (str(final_audio_path), metadata)
-        else:
-            # Log an error if the expected file is not found, even if the process exited successfully
-            logging.error(f"yt-dlp completed but expected output file '{final_audio_path}' not found.")
-            logging.error("Please check yt-dlp output above for clues.")
-            # Attempt to find any audio file that might have been created with a different extension
-            audio_files = list(output_dir.glob(f"{base_filename}.*"))
-            possible_audio = [f for f in audio_files if f.suffix.lower() in ['.mp3', '.m4a', '.wav', '.ogg', '.opus']]
-            if possible_audio:
-                 # If an alternative audio file is found, log a warning and return its path
-                 found_path = str(possible_audio[0])
-                 logging.warning(f"Found an alternative audio file: {found_path}. Returning this path.")
-                 return (found_path, metadata)
-            # If no suitable audio file is found, return None
-            return None
-
-    # --- Error Handling Strategy for subprocess execution ---
-    # Handle specific exceptions that can occur during subprocess execution:
-    # 1. CalledProcessError: Raised when the yt-dlp command returns a non-zero exit code.
-    #    - Log the error code, command, and stderr for debugging.
-    # 2. FileNotFoundError: Raised if the yt-dlp executable is not found.
-    #    - Log a clear error message indicating the missing executable.
-    # 3. Other exceptions: Catch any other unexpected errors during the process.
-    #    - Log the error with traceback information.
-    except subprocess.CalledProcessError as e:
-        logging.error(f"yt-dlp failed (Exit Code {e.returncode}). URL: {url}")
-        logging.error(f"Command: {' '.join(e.cmd)}")
-        logging.error(f"Stderr:\n{e.stderr}")
-        return None
-    except FileNotFoundError:
-        logging.error(f"'{YT_DLP_PATH}' command not found. Is yt-dlp installed and in PATH?")
-        return None
-    except Exception as e:
-        logging.error(f"An unexpected error occurred during download: {e}", exc_info=True)
-        return None
 
