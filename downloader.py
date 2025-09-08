@@ -32,7 +32,51 @@ try:
 except ImportError:
     print("ERROR: 'yt-dlp' library not found. Install using: pip install yt-dlp", file=sys.stderr)
     sys.exit(1)
-    
+
+def _ensure_utf8_netscape(cookie_path: str, temp_list: list[str]) -> str:
+    """
+    Ensure cookie file is UTF-8 text. If not, re-encode to UTF-8 in a temp file.
+    Also detect accidental SQLite DBs.
+    """
+    try:
+        with open(cookie_path, 'rb') as f:
+            data = f.read()
+    except Exception as e:
+        logging.warning(f"Cannot read cookies file '{cookie_path}': {e}")
+        return cookie_path
+
+    # Detect SQLite DBs (wrong file)
+    if data.startswith(b"SQLite format 3"):
+        logging.error("Provided cookies file appears to be a Chrome/SQLite DB, not a Netscape cookies.txt export. "
+                      "Please export with a 'cookies.txt' extension/format.")
+        return cookie_path
+
+    # Try UTF-8 first
+    try:
+        data.decode('utf-8')  # ok as-is
+        return cookie_path
+    except UnicodeDecodeError:
+        pass
+
+    # Try UTF-8 with BOM
+    try:
+        text = data.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        # Fallback to Latin-1 to salvage common CP1252 characters
+        text = data.decode('latin-1')
+
+    # Normalize line endings and re-write as UTF-8
+    text = text.replace('\r\n', '\n')
+    import tempfile, os
+    fd, newp = tempfile.mkstemp(suffix=".cookies.utf8.txt")
+    os.close(fd)
+    with open(newp, 'w', encoding='utf-8') as f:
+        f.write(text)
+    os.chmod(newp, 0o600)
+    temp_list.append(newp)
+    logging.info(f"Re-encoded cookies to UTF-8 at: {newp}")
+    return newp
+
 def _download_cookies_to_temp(url: str) -> Optional[str]:
     try:
         fd, tmp_path = tempfile.mkstemp(suffix=".cookies.txt")
@@ -154,6 +198,9 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
             os.chmod(tmp_copy, 0o600)
             logging.info(f"Using temp cookies file at: {tmp_copy}")
             temp_cookies_file = tmp_copy
+            if temp_cookies_file:
+                temp_cookies_file = _ensure_utf8_netscape(temp_cookies_file, temp_paths_to_cleanup)
+
             temp_paths_to_cleanup.append(tmp_copy)
         except Exception as e:
             logging.warning(f"Could not create temp cookies file from '{orig_cookies_file}': {e}. Continuing without cookies.")
@@ -339,6 +386,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         logging.error(f"Last error: {last_err}")
     return None
+
 
 
 
