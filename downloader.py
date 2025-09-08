@@ -336,6 +336,9 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         _cleanup_temp_cookies()
 
     logging.error("All yt-dlp attempts failed.")
-    if last_e_
+    if last_err:
+        logging.error(f"Last error: {last_err}")
+    return None
+
 
 
