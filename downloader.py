@@ -15,7 +15,11 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 from config import Config
 
-logging.info(f"yt-dlp cfg: extractor_args={getattr(Config, 'YTDLP_EXTRACTOR_ARGS', '')!r} cookies_file={getattr(Config, 'YTDLP_COOKIES_FILE', '')!r} ua_set={bool(getattr(Config, 'YTDLP_USER_AGENT', ''))}")
+logging.info(
+    f"yt-dlp cfg: cookies_file={getattr(Config,'YTDLP_COOKIES_FILE','')!r} "
+    f"ua_set={bool(getattr(Config,'YTDLP_USER_AGENT',''))} "
+    f"retries={getattr(Config,'YTDLP_RETRIES',2)}"
+)
 
 
 # --- Dependency Checks ---
@@ -105,20 +109,14 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     # --- Metadata Extraction ---
     # Extract metadata using the yt-dlp library without downloading the video.
     # This allows us to get information even if the download later fails.
-    ydl_opts = {
-        'quiet': True,          # Suppress console output from yt-dlp library
-        'no_warnings': True,    # Hide warnings from yt-dlp library
-        'extract_flat': False,  # Ensure full metadata is extracted
-    }
-        # Optional: pass cookies/user-agent to metadata extraction, if configured
-    try:
-        if Config.YTDLP_COOKIES_FILE:
-            ydl_opts['cookiefile'] = Config.YTDLP_COOKIES_FILE
-        elif Config.YTDLP_COOKIES_FROM_BROWSER:
-            # Note: library supports this as 'cookiesfrombrowser'
-            ydl_opts['cookiesfrombrowser'] = Config.YTDLP_COOKIES_FROM_BROWSER
-        if Config.YTDLP_USER_AGENT:
-            ydl_opts['user_agent'] = Config.YTDLP_USER_AGENT
+    ydl_opts = {'quiet': True, 'no_warnings': True, 'extract_flat': False}
+
+    if Config.YTDLP_COOKIES_FILE:
+        ydl_opts['cookiefile'] = Config.YTDLP_COOKIES_FILE
+    elif Config.YTDLP_COOKIES_FROM_BROWSER:
+        ydl_opts['cookiesfrombrowser'] = Config.YTDLP_COOKIES_FROM_BROWSER
+    if Config.YTDLP_USER_AGENT:
+        ydl_opts['user_agent'] = Config.YTDLP_USER_AGENT
     except AttributeError:
         # If those config fields don't exist (older Config), just ignore
         pass
@@ -305,3 +303,4 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         logging.error(f"Last error: {last_err}")
     return None
+
