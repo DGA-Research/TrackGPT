@@ -1,7 +1,5 @@
 import streamlit as st
 from pathlib import Path
-import os
-import streamlit as st
 from datetime import datetime
 import re
 import hmac
@@ -9,6 +7,7 @@ from docx import Document
 import io
 from html2docx import html2docx
 
+import os
 
 st.caption("Optional: provide YouTube cookies for sign-in/consent/region-locked videos.")
 cookies_file = st.file_uploader("Upload cookies.txt", type=["txt"])
