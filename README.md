@@ -146,21 +146,9 @@ cookies via file, environment, or Streamlit secrets.
 2.  Visit **youtube.com** and export cookies to a file (e.g.,
     `www.youtube.com_cookies.txt`).
 
-3.  Convert the cookie file to Base64 text:
+3.  Copy the `www.youtube.com_cookies.txt` file to **Upload cookies.txt**
 
-    ``` bash
-    base64 -w0 "www.youtube.com_cookies.txt" > "www.youtube.com_cookies.b64"
-    ```
-
-4.  Copy the text contents of `www.youtube.com_cookies.b64`.
-
-5.  In Streamlit secrets, add:
-
-    ``` dotenv
-    YTDLP_COOKIES_B64="IyBY2FwZSBIVFZSBGaWxlCiMgaHR0cDovL2N1cDov..."
-    ```
-
-6.  Re-run TrackGPT. If a log-in error appears, repeat steps 1--3 reboot app to refresh your cookies.
+4.  If a log-in error appears, repeat steps 1--3 and reboot app to refresh your cookies.
 
 ------------------------------------------------------------------------
 
@@ -199,5 +187,6 @@ Generate a combined **Highlights + Bullets report** for a YouTube video:
 
 5.  After processing, download the DOCX or HTML report with citations
     and transcript.
+
 
 
