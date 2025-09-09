@@ -5,3 +5,4 @@ tenacity>=8.2.3
 pydub
 assemblyai
 html2docx
+streamlit
