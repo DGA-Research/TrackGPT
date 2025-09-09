@@ -34,7 +34,7 @@ The app streamlines analysis of video/audio sources in **four steps**:
 4.  **Report Generation**
     -   Produces HTML and DOCX reports (with citation formatting and
         speaker attribution)
-    -   Includes metadata (title, uploader, date, platform, duration)\
+    -   Includes metadata (title, uploader, date, platform, duration)
     -   Offers direct downloads of reports and audio files
 
 ------------------------------------------------------------------------
@@ -46,7 +46,7 @@ The app streamlines analysis of video/audio sources in **four steps**:
 -   **yt-dlp Hardening:**
     -   Cookie file support (`cookies.txt`, browser export, Base64, or
         URL download)
-    -   Configurable retries, geo-bypass, and user-agent override\
+    -   Configurable retries, geo-bypass, and user-agent override
 -   **Metadata Extraction:** Captures video title, uploader, upload
     date, platform, duration, and more
 -   **Robust Transcription:** Automatic chunking for large files, retry
@@ -199,4 +199,5 @@ Generate a combined **Highlights + Bullets report** for a YouTube video:
 
 5.  After processing, download the DOCX or HTML report with citations
     and transcript.
+
 
