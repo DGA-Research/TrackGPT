@@ -14,26 +14,26 @@ formatted HTML/DOCX reports.
 The app streamlines analysis of video/audio sources in **four steps**:
 
 1.  **Input**
-    -   Upload an audio/video file\
-    -   Paste a transcript\
-    -   Provide a video/audio URL (e.g., YouTube, Vimeo)\
+    -   Upload an audio/video file
+    -   Paste a transcript
+    -   Provide a video/audio URL (e.g., YouTube, Vimeo)
     -   *(Optional)* Upload a `cookies.txt` file to handle region-locked
         or consent-gated videos
 2.  **Transcription**
-    -   Converts audio into text using OpenAI's Whisper API\
+    -   Converts audio into text using OpenAI's Whisper API
     -   Automatically splits files \>25MB into overlapping chunks with
-        `ffmpeg`\
+        `ffmpeg`
     -   Recovers gracefully from failed chunk uploads
 3.  **Analysis**
     -   Runs the transcript through an OpenAI GPT model (e.g.,
-        GPT-4.1-mini, GPT-4o-mini)\
+        GPT-4.1-mini, GPT-4o-mini)
     -   Extracts **Headline, Speaker, Body, Source, Date** in structured
-        bullets\
+        bullets
     -   Supports multiple report modes: Highlights, Bullets, Both, or
         Transcript-only
 4.  **Report Generation**
     -   Produces HTML and DOCX reports (with citation formatting and
-        speaker attribution)\
+        speaker attribution)
     -   Includes metadata (title, uploader, date, platform, duration)\
     -   Offers direct downloads of reports and audio files
 
@@ -42,21 +42,21 @@ The app streamlines analysis of video/audio sources in **four steps**:
 ## Key Features
 
 -   **Streamlit Web App:** Clean, interactive interface with
-    step-by-step workflow\
+    step-by-step workflow
 -   **yt-dlp Hardening:**
     -   Cookie file support (`cookies.txt`, browser export, Base64, or
-        URL download)\
+        URL download)
     -   Configurable retries, geo-bypass, and user-agent override\
 -   **Metadata Extraction:** Captures video title, uploader, upload
-    date, platform, duration, and more\
+    date, platform, duration, and more
 -   **Robust Transcription:** Automatic chunking for large files, retry
-    handling for API errors\
+    handling for API errors
 -   **Flexible Reports:** Choose Highlights, Bullets, Both, or
-    Transcript-only\
+    Transcript-only
 -   **Download Options:** Export HTML, DOCX (via `html2docx`), and audio
-    files\
+    files
 -   **Configurable:** Secrets and defaults loaded from `st.secrets` or
-    environment variables via `.env`\
+    environment variables via `.env`
 -   **Secure:** API keys managed via Streamlit secrets or `.env`; cookie
     files stored with restricted permissions and cleaned up after use
 
@@ -64,14 +64,14 @@ The app streamlines analysis of video/audio sources in **four steps**:
 
 ## Requirements
 
--   **Python:** 3.8+\
+-   **Python:** 3.8+
 -   **API Keys:**
-    -   `OPENAI_API_KEY` (required)\
-    -   `ASSEMBLYAI_API_KEY` (required for current pipeline)\
+    -   `OPENAI_API_KEY` (required)
+    -   `ASSEMBLYAI_API_KEY` (required for current pipeline)
 -   **External Tools:**
-    -   `yt-dlp` -- audio/video download and metadata extraction\
+    -   `yt-dlp` -- audio/video download and metadata extraction
     -   `ffmpeg` + `ffprobe` -- required for audio conversion and
-        chunking\
+        chunking
 -   **Python Packages:**
     -   `streamlit`, `openai`, `python-dotenv`, `yt-dlp`, `html2docx`,
         `tenacity`
@@ -105,8 +105,8 @@ The app streamlines analysis of video/audio sources in **four steps**:
 
 4.  **Install external tools:**
 
-    -   [yt-dlp](https://github.com/yt-dlp/yt-dlp#installation)\
-    -   [ffmpeg & ffprobe](https://ffmpeg.org/download.html)\
+    -   [yt-dlp](https://github.com/yt-dlp/yt-dlp#installation)
+    -   [ffmpeg & ffprobe](https://ffmpeg.org/download.html)
         Make sure all are in your system PATH.
 
 5.  **Configure API keys:**
@@ -141,10 +141,10 @@ cookies via file, environment, or Streamlit secrets.
 
 1.  Install the [**Get cookies.txt
     locally**](https://chrome.google.com/webstore/detail/get-cookiestxt-local-exp/naepdomgkenhinolocfifgehidddafch)
-    browser extension.\
+    browser extension.
 
 2.  Visit **youtube.com** and export cookies to a file (e.g.,
-    `www.youtube.com_cookies.txt`).\
+    `www.youtube.com_cookies.txt`).
 
 3.  Convert the cookie file to Base64 text:
 
@@ -152,7 +152,7 @@ cookies via file, environment, or Streamlit secrets.
     base64 -w0 "www.youtube.com_cookies.txt" > "www.youtube.com_cookies.b64"
     ```
 
-4.  Copy the text contents of `www.youtube.com_cookies.b64`.\
+4.  Copy the text contents of `www.youtube.com_cookies.b64`.
 
 5.  In Streamlit secrets, add:
 
@@ -160,8 +160,7 @@ cookies via file, environment, or Streamlit secrets.
     YTDLP_COOKIES_B64="IyBY2FwZSBIVFZSBGaWxlCiMgaHR0cDovL2N1cDov..."
     ```
 
-6.  Re-run TrackGPT. If a log-in error appears, repeat steps 1--3 to
-    refresh your cookies.
+6.  Re-run TrackGPT. If a log-in error appears, repeat steps 1--3 reboot app to refresh your cookies.
 
 ------------------------------------------------------------------------
 
@@ -176,10 +175,10 @@ streamlit run app.py
 Navigate to the provided local URL. The workflow is:
 
 1.  **Step 1:** Choose input (upload file, paste transcript, or URL) and
-    select report type\
+    select report type
 2.  **Step 2:** Review and edit transcript & speaker labels\
 3.  **Step 3:** Generate the chosen report (highlights, bullets, both,
-    or transcript only)\
+    or transcript only)
 4.  **Step 4:** Download reports/audio and optionally restart
 
 ------------------------------------------------------------------------
@@ -188,15 +187,16 @@ Navigate to the provided local URL. The workflow is:
 
 Generate a combined **Highlights + Bullets report** for a YouTube video:
 
-1.  Run `streamlit run app.py`\
+1.  Run `streamlit run app.py`
 
 2.  Paste the URL:
 
         https://www.youtube.com/watch?v=rDexVZY3yYE
 
-3.  Enter target name: `Kanye West`\
+3.  Enter target name: `Kanye West`
 
-4.  Select **Generate Highlights and Bullets**\
+4.  Select **Generate Highlights and Bullets**
 
 5.  After processing, download the DOCX or HTML report with citations
     and transcript.
+
