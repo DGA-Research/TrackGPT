@@ -10,9 +10,6 @@ import requests
 
 st.set_page_config(page_title="YouTube OAuth in Streamlit")
 
-# 1) Put your Google Cloud OAuth client (type: Web) here
-#    Create at https://console.cloud.google.com/apis/credentials
-#    Add an authorized redirect URI: http://localhost:8501 (or your deployed URL)
 CLIENT_CONFIG = {
     "web": {
         "client_id":     st.secrets["google_oauth"]["client_id"],
@@ -23,7 +20,6 @@ CLIENT_CONFIG = {
     }
 }
 
-# Scopes for read-only YouTube access; add more if you need to write.
 SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
 
 def get_flow():
@@ -38,26 +34,31 @@ def begin_auth():
     auth_url, state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
-        prompt="consent"  # ensures we can get a refresh_token the first time
+        prompt="consent"
     )
     st.session_state["oauth_state"] = state
-    st.experimental_set_query_params(oauth="start")  # cosmetic
+    # was: st.experimental_set_query_params(oauth="start")
+    st.query_params["oauth"] = "start"   # cosmetic
     st.write("Redirecting to Google…")
     st.markdown(f"[Continue]({auth_url})")
 
+def _first(val):
+    # st.query_params returns str for single values, list[str] for multi.
+    return val[0] if isinstance(val, list) else val
+
 def handle_callback():
-    # Google redirects back with ?state=...&code=...
-    params = st.experimental_get_query_params()
+    # was: params = st.experimental_get_query_params()
+    params = dict(st.query_params)
     if "state" not in params or "code" not in params:
         st.error("Missing OAuth parameters.")
         return
 
-    if params["state"][0] != st.session_state.get("oauth_state"):
+    if _first(params["state"]) != st.session_state.get("oauth_state"):
         st.error("State mismatch. Try again.")
         return
 
     flow = get_flow()
-    flow.fetch_token(code=params["code"][0])
+    flow.fetch_token(code=_first(params["code"]))
     creds = flow.credentials
     st.session_state["creds"] = {
         "token": creds.token,
@@ -68,8 +69,8 @@ def handle_callback():
         "scopes": creds.scopes,
         "expiry": creds.expiry.timestamp() if creds.expiry else None,
     }
-    # Clear query params so refreshes don't re-run callback
-    st.experimental_set_query_params()
+    # was: st.experimental_set_query_params()
+    st.query_params.clear()  # clear query params so refreshes don't re-run callback
     st.success("Signed in with Google!")
 
 def ensure_fresh_creds():
@@ -84,7 +85,6 @@ def ensure_fresh_creds():
         client_secret=data["client_secret"],
         scopes=data["scopes"]
     )
-    # Refresh if near expiry
     if not creds.valid and creds.refresh_token:
         try:
             creds.refresh(Request())
@@ -107,7 +107,8 @@ def yt_get(subpath, creds, params=None):
 st.title("YouTube login (OAuth) in Streamlit")
 
 # 2) Handle the OAuth callback when Google redirects back
-qs = st.experimental_get_query_params()
+# was: qs = st.experimental_get_query_params()
+qs = dict(st.query_params)
 if "code" in qs and "state" in qs:
     handle_callback()
 
@@ -138,5 +139,6 @@ if st.button("Fetch my channel info"):
 # Optional: sign out
 if st.button("Sign out"):
     st.session_state.pop("creds", None)
-    st.experimental_set_query_params()
+    # was: st.experimental_set_query_params()
+    st.query_params.clear()
     st.rerun()
