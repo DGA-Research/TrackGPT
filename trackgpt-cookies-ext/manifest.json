@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "TrackGPT Cookies Helper",
+  "version": "0.1.0",
+  "action": { "default_popup": "popup.html" },
+  "permissions": ["cookies", "activeTab", "storage"],
+  "host_permissions": ["https://www.youtube.com/*"],
+  "icons": { "128": "icon128.png" }
+}
