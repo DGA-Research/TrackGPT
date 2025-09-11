@@ -24,7 +24,10 @@ CLIENT_CONFIG = {
 SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
 
 # Use a dedicated secret for signing if you have one; else fall back to client_secret.
-STATE_SIGNING_KEY = st.secrets["google_oauth"].get("state_secret", st.secrets["google_oauth"]["client_secret"])
+STATE_SIGNING_KEY = st.secrets["google_oauth"].get(
+    "state_secret",
+    st.secrets["google_oauth"]["client_secret"],  # fallback for dev
+)
 
 def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
@@ -33,7 +36,7 @@ def _unb64url(s: str) -> bytes:
     pad = "=" * (-len(s) % 4)
     return base64.urlsafe_b64decode(s + pad)
 
-def make_state():
+def make_state() -> str:
     payload = {
         "ts": int(time.time()),
         "nonce": _b64url(os.urandom(16)),
@@ -41,7 +44,7 @@ def make_state():
     body = _b64url(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
     sig = _b64url(hmac.new(STATE_SIGNING_KEY.encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest())
     return f"{body}.{sig}"
-
+    
 def verify_state(state: str, max_age_sec: int = 300) -> bool:
     try:
         body, sig = state.split(".")
@@ -69,35 +72,39 @@ def begin_auth():
     state_token = make_state()
     auth_url, _ = flow.authorization_url(
         access_type="offline",
-        include_granted_scopes="true",
+        include_granted_scopes="true",  # str or True both work
         prompt="consent",
-        state=state_token,  # << we set our own state
+        state=state_token,              # << stateless signed state
     )
+    # Cosmetic breadcrumb in URL during outbound leg (optional)
     st.query_params["oauth"] = "start"
     st.write("Redirecting to Google…")
     st.markdown(f"[Continue]({auth_url})")
     
 def _first(val):
-    # st.query_params returns str for single values, list[str] for multi.
+    # st.query_params can yield str or list[str]
     return val[0] if isinstance(val, list) else val
 
 def handle_callback():
     params = dict(st.query_params)
-    # Read the returned state/code directly from the URL
     state = params.get("state")
     code  = params.get("code")
+
     if not state or not code:
         st.error("Missing OAuth parameters.")
         return
 
-    # Verify the signed state (stateless)
-    if not verify_state(state if isinstance(state, str) else state[0]):
+    state = _first(state)
+    code  = _first(code)
+
+    if not verify_state(state):
         st.error("State verification failed. Try again.")
         return
 
     flow = get_flow()
-    flow.fetch_token(code=code if isinstance(code, str) else code[0])
+    flow.fetch_token(code=code)
     creds = flow.credentials
+
     st.session_state["creds"] = {
         "token": creds.token,
         "refresh_token": creds.refresh_token,
@@ -107,8 +114,11 @@ def handle_callback():
         "scopes": creds.scopes,
         "expiry": creds.expiry.timestamp() if creds.expiry else None,
     }
+
+    # Prevent re-running the callback on refresh
     st.query_params.clear()
     st.success("Signed in with Google!")
+
 
 def ensure_fresh_creds():
     data = st.session_state.get("creds")
@@ -140,6 +150,13 @@ def yt_get(subpath, creds, params=None):
     r = requests.get(url, headers=headers, params=params or {})
     r.raise_for_status()
     return r.json()
+    
+# Handle the OAuth callback ASAP
+qs = dict(st.query_params)
+if "code" in qs and "state" in qs:
+    handle_callback()
+
+
 
 st.title("YouTube login (OAuth) in Streamlit")
 
