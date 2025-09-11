@@ -33,7 +33,9 @@ CLIENT_CONFIG = {
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
 
-# --- Stateless signed state helpers ---
+# =========================
+# Stateless signed state helpers
+# =========================
 STATE_SIGNING_KEY = st.secrets["google_oauth"].get(
     "state_secret",
     st.secrets["google_oauth"]["client_secret"],  # fallback for dev
@@ -66,7 +68,9 @@ def verify_state(state: str, max_age_sec: int = 300) -> bool:
 def _first(val):
     return val[0] if isinstance(val, list) else val
 
-# --- OAuth helpers ---
+# =========================
+# OAuth helpers
+# =========================
 def get_flow():
     return Flow.from_client_config(
         CLIENT_CONFIG,
@@ -141,12 +145,16 @@ def yt_get(subpath, creds, params=None):
     r.raise_for_status()
     return r.json()
 
-# === 1) Handle the OAuth callback ASAP (once) ===
+# =========================
+# Handle the OAuth callback ASAP (once)
+# =========================
 qs = dict(st.query_params)
 if "code" in qs and "state" in qs:
     handle_callback()
 
-# === 2) Optional password gate AFTER callback ===
+# =========================
+# Optional password gate AFTER callback
+# =========================
 PASS = st.secrets.get("password")
 if PASS:
     if not st.session_state.get("pw_ok"):
@@ -156,7 +164,9 @@ if PASS:
             st.session_state["pw_ok"] = (pw == PASS)
         st.stop()
 
-# === 3) Google sign-in gate ===
+# =========================
+# Google sign-in gate
+# =========================
 st.title("TrackGPT")
 if "creds" not in st.session_state:
     st.info("Authorize YouTube read access to continue.")
@@ -164,15 +174,130 @@ if "creds" not in st.session_state:
         begin_auth()
     st.stop()
 
-# ======= MAIN APP UI =======
+# =========================
+# Cookie OTC helpers (FastAPI service)
+# =========================
+COOKIE_API_BASE = st.secrets.get("COOKIE_API_BASE", "").rstrip("/")
+def _require_cookie_api():
+    if not COOKIE_API_BASE:
+        st.warning("COOKIE_API_BASE not set. Set it in Secrets to enable one-click cookie handoff.")
+        return False
+    return True
+
+def issue_otc():
+    r = requests.post(f"{COOKIE_API_BASE}/issue", timeout=10)
+    r.raise_for_status()
+    data = r.json()
+    return data["otc"], data["expires_at"]
+
+def claim_cookies(otc: str):
+    r = requests.post(f"{COOKIE_API_BASE}/claim", json={"otc": otc}, timeout=10)
+    if r.status_code == 404:
+        return None  # not uploaded yet
+    r.raise_for_status()
+    return r.json()["cookies_b64"]
+
+def set_cookies_env_from_session():
+    """
+    Just-in-time: expose session cookies (if present) to downloader via env.
+    """
+    if st.session_state.get("cookies_b64"):
+        os.environ["YTDLP_COOKIES_B64"] = st.session_state["cookies_b64"]
+    else:
+        os.environ.pop("YTDLP_COOKIES_B64", None)
+
+# =========================
+# Main App UI
+# =========================
+
+# Sidebar: Account + Session Cookies
+with st.sidebar:
+    st.subheader("Account")
+    if st.button("Sign out"):
+        st.session_state.pop("creds", None)
+        st.query_params.clear()
+        st.rerun()
+
+    st.markdown("---")
+    st.subheader("Session cookies")
+    st.caption("Use for gated YouTube videos. Cookies are stored only for this session.")
+
+    # One-time code flow (extension push)
+    if _require_cookie_api():
+        colA, colB = st.columns([1,1])
+        with colA:
+            if st.button("Generate code"):
+                try:
+                    otc, exp = issue_otc()
+                    st.session_state["cookie_otc"] = otc
+                    st.session_state["cookie_exp"] = exp
+                except Exception as e:
+                    st.error(f"Could not issue code: {e}")
+        with colB:
+            if st.button("Claim cookies"):
+                try:
+                    otc = st.session_state.get("cookie_otc")
+                    if not otc:
+                        st.info("Generate a code first.")
+                    else:
+                        cookies_b64 = claim_cookies(otc)
+                        if cookies_b64 is None:
+                            st.info("Not uploaded yet. In the extension, paste the code and click “Send cookies”, then try Claim again.")
+                        else:
+                            st.session_state["cookies_b64"] = cookies_b64
+                            set_cookies_env_from_session()
+                            st.success("Session cookies loaded.")
+                except requests.HTTPError as e:
+                    st.error(f"Claim failed: {getattr(e.response, 'text', e)}")
+                except Exception as e:
+                    st.error(f"Claim failed: {e}")
+
+        if st.session_state.get("cookie_otc"):
+            st.caption("One-time code (paste in the Chrome extension):")
+            st.code(st.session_state["cookie_otc"], language="text")
+            if COOKIE_API_BASE:
+                st.text_input("Extension endpoint", value=f"{COOKIE_API_BASE}/upload", disabled=True)
+
+    # Manual upload/paste fallback
+    with st.expander("Manual cookies upload/paste"):
+        upl = st.file_uploader("Upload cookies.txt (Netscape format)", type=["txt"], key="cookies_upl")
+        pasted = st.text_area("…or paste cookies.txt content", key="cookies_paste", height=120)
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Use uploaded/pasted"):
+                try:
+                    if upl:
+                        content = upl.read()
+                    elif pasted.strip():
+                        content = pasted.encode("utf-8")
+                    else:
+                        content = None
+                    if not content:
+                        st.info("Provide a file or paste cookies first.")
+                    else:
+                        st.session_state["cookies_b64"] = base64.b64encode(content).decode("ascii")
+                        set_cookies_env_from_session()
+                        st.success("Session cookies loaded.")
+                except Exception as e:
+                    st.error(f"Failed to load cookies: {e}")
+        with col2:
+            if st.button("Clear session cookies"):
+                st.session_state.pop("cookies_b64", None)
+                set_cookies_env_from_session()
+                st.info("Cleared.")
+
+# ======= Workflows =======
+
 def run_single(url: str, target_name: str, speaker_hint: str):
+    # Ensure JIT cookies exposure before download
+    set_cookies_env_from_session()
+
     outdir = Path("runs") / time.strftime("%Y%m%d-%H%M%S")
     outdir.mkdir(parents=True, exist_ok=True)
 
     # 1) Download audio + metadata
     with st.status("Downloading audio...", expanded=True) as s:
         base_filename = "trackgpt"
-        # downloader takes a 'type_input' (we’ll tag it as 'youtube' unless URL says otherwise)
         type_input = "youtube" if "youtube" in url.lower() else "web"
         dl = downloader.download_audio(url, outdir, base_filename, type_input)
         if not dl:
@@ -227,16 +352,13 @@ def run_single(url: str, target_name: str, speaker_hint: str):
 
     # 4) Save outputs (txt + html)
     with st.status("Generating outputs...", expanded=True) as s:
-        # Save raw transcript
         transcript_path = outdir / "transcript.txt"
         output_mod.save_text_file(transcript_text, transcript_path)
 
-        # Save raw bullet/highlight JSON for audit
         (outdir / "results").mkdir(exist_ok=True)
         (outdir / "results" / "bullets.json").write_text(json.dumps(bullets, indent=2))
         (outdir / "results" / "highlights.json").write_text(json.dumps(highlights, indent=2))
 
-        # HTML report
         report_html = output_mod.generate_report_both(
             metadata=metadata,
             extracted_bullets_raw=bullets,
@@ -300,14 +422,6 @@ def run_bulk_csv(file):
             st.error(f"Row failed: {e}")
         done += 1
         progress.progress(done / max(1, len(rows)))
-
-# Sidebar sign-out
-with st.sidebar:
-    st.subheader("Account")
-    if st.button("Sign out"):
-        st.session_state.pop("creds", None)
-        st.query_params.clear()
-        st.rerun()
 
 # Tabs for your workflows
 tab1, tab2, tab3 = st.tabs(["Single video", "Bulk / CSV", "Google API test"])
