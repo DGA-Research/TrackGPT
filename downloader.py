@@ -90,11 +90,6 @@ def _download_cookies_to_temp(url: str) -> Optional[str]:
         logging.warning(f"Could not fetch cookies from {url}: {e}")
         return None
 
-cookies_url = os.getenv("YTDLP_COOKIES_URL", getattr(Config, "YTDLP_COOKIES_URL", "") if hasattr(Config, "YTDLP_COOKIES_URL") else "").strip()
-if cookies_url and not orig_cookies_file:
-    fetched = _download_cookies_to_temp(cookies_url)
-    if fetched:
-        orig_cookies_file = fetched
 def find_yt_dlp_executable() -> Optional[str]:
     """
     Locates the yt-dlp executable on the system.
@@ -158,23 +153,16 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     output_path_template = output_dir / f"{base_filename}.%(ext)s"
     final_audio_path = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
 
-    # --- Cookies: prefer Base64 in secrets/env, else file path; ensure writable path for yt-dlp ---
-    # Read env/secrets (env overrides Config at runtime)
+    # --- Cookies: prefer Base64 in secrets/env, else file path, else URL, else browser ---
     orig_cookies_file = os.getenv("YTDLP_COOKIES_FILE", getattr(Config, "YTDLP_COOKIES_FILE", "")).strip()
-    cookies_b64 = os.getenv(
-        "YTDLP_COOKIES_B64",
-        getattr(Config, "YTDLP_COOKIES_B64", "") if hasattr(Config, "YTDLP_COOKIES_B64") else ""
-    ).strip()
-    cookies_from_browser = os.getenv(
-        "YTDLP_COOKIES_FROM_BROWSER",
-        getattr(Config, "YTDLP_COOKIES_FROM_BROWSER", "") if hasattr(Config, "YTDLP_COOKIES_FROM_BROWSER") else ""
-    ).strip()
+    cookies_b64 = os.getenv("YTDLP_COOKIES_B64", getattr(Config, "YTDLP_COOKIES_B64", "") if hasattr(Config, "YTDLP_COOKIES_B64") else "").strip()
+    cookies_from_browser = os.getenv("YTDLP_COOKIES_FROM_BROWSER", getattr(Config, "YTDLP_COOKIES_FROM_BROWSER", "") if hasattr(Config, "YTDLP_COOKIES_FROM_BROWSER") else "").strip()
+    cookies_url = os.getenv("YTDLP_COOKIES_URL", getattr(Config, "YTDLP_COOKIES_URL", "") if hasattr(Config, "YTDLP_COOKIES_URL") else "").strip()
     user_agent = os.getenv("YTDLP_USER_AGENT", getattr(Config, "YTDLP_USER_AGENT", "")).strip()
 
-    # We'll collect any temp files we create to clean them up later
     temp_paths_to_cleanup: list[str] = []
 
-    # If B64 is provided, materialize it to a temp file and prefer that
+    # 1) If B64 is provided, materialize it
     if cookies_b64:
         try:
             fd, tmp_path_from_b64 = tempfile.mkstemp(suffix=".cookies.txt")
@@ -188,7 +176,14 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         except Exception as e:
             logging.warning(f"Failed to decode YTDLP_COOKIES_B64: {e}")
 
-    # If we have a cookies file path, copy it to a writable temp file (yt-dlp writes back on close)
+    # 2) If still no file and a cookies URL is provided, fetch it now
+    if not orig_cookies_file and cookies_url:
+        fetched = _download_cookies_to_temp(cookies_url)
+        if fetched:
+            orig_cookies_file = fetched
+            temp_paths_to_cleanup.append(fetched)
+
+    # 3) If we have a cookies file path, copy → temp (yt-dlp may rewrite)
     temp_cookies_file: Optional[str] = None
     if orig_cookies_file:
         try:
@@ -196,12 +191,9 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
             os.close(fd)
             shutil.copyfile(orig_cookies_file, tmp_copy)
             os.chmod(tmp_copy, 0o600)
-            logging.info(f"Using temp cookies file at: {tmp_copy}")
-            temp_cookies_file = tmp_copy
-            if temp_cookies_file:
-                temp_cookies_file = _ensure_utf8_netscape(temp_cookies_file, temp_paths_to_cleanup)
-
+            temp_cookies_file = _ensure_utf8_netscape(tmp_copy, temp_paths_to_cleanup)
             temp_paths_to_cleanup.append(tmp_copy)
+            logging.info(f"Using temp cookies file at: {temp_cookies_file}")
         except Exception as e:
             logging.warning(f"Could not create temp cookies file from '{orig_cookies_file}': {e}. Continuing without cookies.")
             temp_cookies_file = None
@@ -224,6 +216,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if temp_cookies_file:
         ydl_opts['cookiefile'] = temp_cookies_file
     elif cookies_from_browser:
+        # e.g., "chrome" or "edge" or "firefox"
         ydl_opts['cookiesfrombrowser'] = cookies_from_browser
     if user_agent:
         ydl_opts['user_agent'] = user_agent
@@ -287,10 +280,11 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     elif cookies_from_browser:
         enrich += ["--cookies-from-browser", cookies_from_browser]
 
-    attempts = []
-    attempts.append(("primary", base_cmd + enrich))
-    attempts.append(("tv_embedded", base_cmd + enrich + ["--extractor-args", "youtube:player_client=tv_embedded"]))
-    attempts.append(("web_forced", base_cmd + enrich + ["--extractor-args", "youtube:webpage_download_web=1"]))
+    attempts = [
+        ("primary",        base_cmd + enrich),
+        ("tv_embedded",    base_cmd + enrich + ["--extractor-args", "youtube:player_client=tv_embedded"]),
+        ("web_forced",     base_cmd + enrich + ["--extractor-args", "youtube:webpage_download_web=1"]),
+    ]
 
     # bestaudio ladder; convert locally if needed
     fmt_ladder = "251/140/bestaudio/best"
@@ -344,6 +338,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                 # Success case 1: final mp3 exists
                 if final_audio_path.exists():
                     logging.info(f"Success ({label}) → {final_audio_path}")
+                    _cleanup_temp_cookies()
                     return (str(final_audio_path), {**metadata, "download_attempt": label})
 
                 # Success case 2: another audio exists; convert if needed
@@ -356,10 +351,12 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                     if cand.suffix.lower() in [".mp3", ".m4a", ".webm", ".opus", ".ogg", ".wav"]:
                         if cand.suffix.lower() == ".mp3":
                             logging.info(f"Success ({label}) → {cand}")
+                            _cleanup_temp_cookies()
                             return (str(cand), {**metadata, "download_attempt": label})
                         out = _ensure_mp3(cand, final_audio_path)
                         if out:
                             logging.info(f"Success ({label}) + convert → {out}")
+                            _cleanup_temp_cookies()
                             return (out, {**metadata, "download_attempt": label})
 
                 logging.error(f"Attempt '{label}' completed but no usable audio file was produced.")
@@ -373,19 +370,21 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                 continue
             except FileNotFoundError:
                 logging.error(f"'{YT_DLP_PATH}' not found. Is yt-dlp installed and in PATH?")
+                _cleanup_temp_cookies()
                 return None
             except Exception as e:
                 logging.error(f"Unexpected error during download (attempt '{label}'): {e}", exc_info=True)
                 last_err = e
                 continue
     finally:
-        # Always cleanup temp cookies we created
         _cleanup_temp_cookies()
 
     logging.error("All yt-dlp attempts failed.")
     if last_err:
         logging.error(f"Last error: {last_err}")
     return None
+
+
 
 
 
