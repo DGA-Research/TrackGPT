@@ -24,6 +24,20 @@ from config import Config
 
 log = logging.getLogger(__name__)
 
+def _log_egress_ip(proxy_url: str | None):
+    try:
+        handlers = []
+        if proxy_url:
+            handlers.append(urllib.request.ProxyHandler({'http': proxy_url, 'https': proxy_url}))
+        opener = urllib.request.build_opener(*handlers)
+        with opener.open("https://api.ipify.org", timeout=5) as r:
+            ip = r.read().decode("utf-8", "ignore")
+            log.info("Egress IP%s: %s", f" via proxy={bool(proxy_url)}" , ip)
+    except Exception as e:
+        log.debug("Egress IP check failed: %s", e)
+        
+
+
 # --- Dependency Checks ---
 try:
     import yt_dlp
@@ -278,7 +292,10 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         "YTDLP_PROXY_URL",
         getattr(Config, "YTDLP_PROXY_URL", "") if hasattr(Config, "YTDLP_PROXY_URL") else ""
     ).strip()
+    
+    _log_egress_ip(proxy_url or None)
 
+    
     # --- Metadata (no download) ---
     ydl_opts: Dict[str, Any] = {
         'quiet': True,
@@ -429,3 +446,4 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
