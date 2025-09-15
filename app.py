@@ -7,7 +7,7 @@ from docx import Document
 import io
 from html2docx import html2docx
 
-import os
+import os, logging
 
 
 
