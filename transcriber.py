@@ -162,6 +162,33 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
         lines.append("")  # blank line between segments
     base_text = "\n".join(lines).strip()
 
+
+
+    # First non-blank line (often the host intro)
+    first_talking_line = next((ln for ln in base_text.splitlines() if ln.strip()), "")
+
+    looks_like_host_intro = bool(re.search(
+        r"\b(Joining us now|We('?| a)re joined by|Welcome back|Joining me|Now to|We have with us)\b",
+        first_talking_line,
+        re.I,
+    ))
+
+    # Names explicitly mentioned in the intro line (likely guests, not the current speaker)
+    mentioned_in_intro = re.findall(
+        r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b",
+        first_talking_line,
+    )
+    # crude filter of non-names you saw in practice; tailor as needed
+    blocklist = {"fox", "news", "turning", "point", "usa", "founder", "host", "commentator"}
+    mentioned_in_intro = [
+        n for n in mentioned_in_intro
+        if len(n.split()) <= 3 and n.lower() not in blocklist
+    ]
+
+    # Names addressed like "Well, Liz," in later lines (helps pick the host)
+    addressed_names = re.findall(r"\bWell,\s+([A-Z][a-zA-Z]+)\b", base_text)
+    addressed_names = list(dict.fromkeys(addressed_names))  # dedupe
+
     # ---- If single speaker, append a deterministic name so UI can parse ----
     if len(unique_speakers) == 1:
         single_label = segments[0]["spk_label"]  # e.g., "A" or "1"
@@ -201,18 +228,46 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
 
 
 
-    # Candidate hints (comma/semicolon separated in `speaker_hint`, if user passed known names)
-    candidates = []
+    # pull capitalized tokens followed by comma (e.g., "Liz,")
+    comma_names = re.findall(r"\b([A-Z][a-zA-Z]+),", base_text)
+
+    auto_candidates = mentioned_in_intro + addressed_names + comma_names
+
+    # merge with user-provided candidates
     if speaker_hint:
-        for tok in re.split(r"[;,/]| and | vs | with ", speaker_hint, flags=re.IGNORECASE):
+        for tok in re.split(r"[;,/]| and | vs | with ", speaker_hint, flags=re.I):
             tok = tok.strip()
             if tok:
-                candidates.append(tok)
-    candidates = list(dict.fromkeys(candidates))  # dedupe, preserve order
+                auto_candidates.append(tok)
+
+    # dedupe & trim
+    candidates = list(dict.fromkeys(auto_candidates))[:8]
     candidate_block = ", ".join(candidates) if candidates else "None"
+    role_hints = []
+    if looks_like_host_intro:
+        role_hints.append(
+            "If the first line is an intro (e.g., 'Joining us now', 'We’re joined by'), "
+            "that line is the HOST speaking. Any person named in that line is a different speaker (the guest)."
+        )
+    if mentioned_in_intro:
+        role_hints.append(
+            "Names explicitly mentioned in the intro line (likely guests): "
+            + ", ".join(mentioned_in_intro) + "."
+        )
+    if addressed_names:
+        role_hints.append(
+            "If a line begins with 'Well, NAME,', NAME is being addressed (the other speaker), "
+            "not the current line's speaker."
+        )
+
+    role_hint_block = "\n".join(role_hints) if role_hints else "No extra role hints."
+
+    logging.debug("candidates=%s", candidate_block)
+    logging.debug("role_hints=%s", role_hint_block)
 
     # ---- Multi-speaker: GPT name guessing with STRICT preservation ----
     client = openai.OpenAI(api_key=openai_key)
+
     system_prompt = f"""
 You must preserve the input transcript EXACTLY:
 - Do NOT change or remove timestamps like [HH:MM:SS].
@@ -231,12 +286,17 @@ Rules:
 - If unsure, use (Unknown).
 - Be consistent for the same Speaker across the whole file.
 - Use these candidates if relevant: {candidate_block}
-- Use these short samples to inform your guesses (do not copy these into the output):
+
+Additional disambiguation hints (follow strictly):
+{role_hint_block}
+
+Use these short samples to inform your guesses (do not copy these into the output):
 -----
 {profile_block}
 -----
 """.strip()
-
+    logging.debug("GPT candidate_block=%r", candidate_block)
+    logging.debug("GPT role_hint_block=%r", role_hint_block)
     try:
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -255,10 +315,9 @@ Rules:
             logging.warning("Name guessing changed line count; returning baseline.")
             return base_text
 
-        ts_pat = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):")
-        ts_pat_named = re.compile(
-            r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*(\([^)]+\))?:"
-        )
+        ts_pat = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):\s*$")
+        ts_pat_named = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*(\([^)]+\))?\s*:\s*$")
+
 
         label_map_in2out: dict[str, str] = {}
         label_map_out2in: dict[str, str] = {}
@@ -437,6 +496,7 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
+
 
 
 
