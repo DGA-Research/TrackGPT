@@ -13,6 +13,7 @@ import json
 from typing import Optional, List, Dict, Any
 from config import Config
 import re
+import string
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,26 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
         logging.error("No segments produced from utterances, paragraphs, or words.")
         return (transcript.text or "").strip()
 
+
+
+
+
+
+
+
+
+
+    # ---- Normalize speaker ids to letter labels (A, B, C, ...) ----
+    # Build a stable mapping so the same numeric diarization id always becomes the same letter
+    speaker_list = sorted(list(unique_speakers), key=lambda x: (isinstance(x, str), x))
+    label_map = {}
+    for i, spk in enumerate(speaker_list):
+        label_map[spk] = string.ascii_uppercase[i] if i < 26 else f"S{i+1}"  # A..Z then S27, S28...
+
+    # Also rewrite segments to carry the label alongside the raw id
+    for s in segments:
+        s["spk_label"] = label_map.get(s["spk"], str(s["spk"]))
+    
     # ---- Render baseline (canonical) ----
     lines: list[str] = []
     for seg in segments:
@@ -130,8 +151,8 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
         if not text:
             continue
         ts = format_timestamp(seg["start"])
-        spk = seg["spk"]
-        lines.append(f"[{ts}] Speaker {spk}: {text}")
+        spk_label = seg["spk_label"]          # <-- use letter label
+        lines.append(f"[{ts}] Speaker {spk_label}: {text}")
         lines.append("")  # blank line between segments
     base_text = "\n".join(lines).strip()
 
@@ -140,20 +161,22 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
         return base_text
 
     # ---- Build tiny "voice profiles" per speaker to help accurate naming ----
-    # We’ll feed GPT a compact context block with the first ~2 short clips per speaker (when available)
-    by_spk: dict[int, list[str]] = {}
+    # ---- Build tiny "voice profiles" per speaker to help accurate naming ----
+    by_label: dict[str, list[str]] = {}
     for seg in segments:
-        by_spk.setdefault(seg["spk"], [])
-        if len(by_spk[seg["spk"]]) < 2 and len(seg["text"].split()) >= 6:
+        lab = seg["spk_label"]
+        by_label.setdefault(lab, [])
+        if len(by_label[lab]) < 2 and len(seg["text"].split()) >= 6:
             ts = format_timestamp(seg["start"])
-            by_spk[seg["spk"]].append(f"[{ts}] {seg['text']}")
+            by_label[lab].append(f"[{ts}] {seg['text']}")
 
     profiles = []
-    for spk, samples in sorted(by_spk.items(), key=lambda kv: kv[0]):
-        # Join up to two short samples per speaker
-        sample_text = "\n".join(samples) if samples else "(no sample)"
-        profiles.append(f"Speaker {spk} samples:\n{sample_text}")
+    for lab in sorted(by_label.keys()):
+        sample_text = "\n".join(by_label[lab]) if by_label[lab] else "(no sample)"
+        profiles.append(f"Speaker {lab} samples:\n{sample_text}")
     profile_block = "\n\n".join(profiles) if profiles else "(no samples)"
+
+
 
     # Candidate hints (comma/semicolon separated in `speaker_hint`, if user passed known names)
     candidates = []
@@ -181,7 +204,7 @@ Example:
   Output: [00:00:03] Speaker 1 (Jane Doe): Thank you for coming.
 
 Rules:
-- Keep the Speaker numbering identical to the input.
+- Keep the exact token after "Speaker " unchanged (e.g., if input has Speaker A, do not change it to Speaker 1).
 - If unsure, use (Unknown).
 - Be consistent for the same Speaker across the whole file.
 - Use these candidates if relevant: {candidate_block}
@@ -209,10 +232,13 @@ Rules:
             logging.warning("Name guessing changed line count; returning baseline.")
             return base_text
 
-        ts_pat = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\d+):")
-        ts_pat_named = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\d+)\s*(\([^)]+\))?:")
+        ts_pat = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+([A-Za-z0-9]+):")
+        ts_pat_named = re.compile(
+            r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+([A-Za-z0-9]+)\s*(\([^)]+\))?:"
+        )
+
         for i, (a, b) in enumerate(zip(base_lines, out_lines)):
-            if not a.strip():   # allow blank line preservation
+            if not a.strip():   # blank line in base must remain blank
                 if b.strip() != "":
                     logging.warning(f"Line {i+1}: expected blank line; returning baseline.")
                     return base_text
@@ -222,10 +248,12 @@ Rules:
             if not ma or not mb:
                 logging.warning(f"Line {i+1}: timestamp/speaker tag mismatch; returning baseline.")
                 return base_text
+            # Compare HH:MM:SS and the exact speaker token (A/B/... or 0/1/...)
             if ma.groups()[:3] != mb.groups()[:3] or ma.group(4) != mb.group(4):
-                logging.warning(f"Line {i+1}: timestamp or speaker number changed; returning baseline.")
+                logging.warning(f"Line {i+1}: timestamp or speaker changed; returning baseline.")
                 return base_text
 
+        # All good — keep GPT output with appended names
         return out or base_text
 
     except Exception as e:
@@ -364,6 +392,7 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
+
 
 
 
