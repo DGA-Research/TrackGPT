@@ -249,53 +249,60 @@ Rules:
         out = (resp.choices[0].message.content or "").strip()
 
         # ---- Safety validation with allowed relabeling (bijection mapping) ----
-    base_lines = base_text.splitlines()
-    out_lines = out.splitlines()
-    if len(base_lines) != len(out_lines):
-        logging.warning("Name guessing changed line count; returning baseline.")
+        base_lines = base_text.splitlines()
+        out_lines = out.splitlines()
+        if len(base_lines) != len(out_lines):
+            logging.warning("Name guessing changed line count; returning baseline.")
+            return base_text
+
+        ts_pat = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):")
+        ts_pat_named = re.compile(
+            r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*(\([^)]+\))?:"
+        )
+
+        label_map_in2out: dict[str, str] = {}
+        label_map_out2in: dict[str, str] = {}
+
+        for i, (a, b) in enumerate(zip(base_lines, out_lines)):
+            if not a.strip():   # blank line must remain blank
+                if b.strip() != "":
+                    logging.warning(f"Line {i+1}: expected blank line; returning baseline.")
+                    return base_text
+                continue
+
+            ma = ts_pat.match(a)
+            mb = ts_pat_named.match(b)
+            if not ma or not mb:
+                logging.warning(f"Line {i+1}: timestamp/speaker tag mismatch; returning baseline.")
+                return base_text
+
+            # timestamps must be identical
+            if ma.groups()[:3] != mb.groups()[:3]:
+                logging.warning(f"Line {i+1}: timestamp changed; returning baseline.")
+                return base_text
+
+            in_label = ma.group(4)   # baseline Speaker token (e.g., A)
+            out_label = mb.group(4)  # output Speaker token (e.g., B)
+
+            # Establish or verify bijection mapping
+            if in_label not in label_map_in2out:
+                if out_label in label_map_out2in and label_map_out2in[out_label] != in_label:
+                    logging.warning(f"Line {i+1}: non-bijective relabeling; returning baseline.")
+                    return base_text
+                label_map_in2out[in_label] = out_label
+                label_map_out2in[out_label] = in_label
+            else:
+                if label_map_in2out[in_label] != out_label:
+                    logging.warning(f"Line {i+1}: inconsistent relabeling; returning baseline.")
+                    return base_text
+
+        # All good — keep GPT output with appended names (and possibly swapped labels)
+        return out or base_text
+
+    except Exception as e:
+        logging.warning(f"Name guessing step failed; returning baseline. Error: {e}")
         return base_text
 
-    ts_pat = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):")
-    ts_pat_named = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*(\([^)]+\))?:")
-
-    label_map_in2out: dict[str, str] = {}
-    label_map_out2in: dict[str, str] = {}
-
-    for i, (a, b) in enumerate(zip(base_lines, out_lines)):
-        if not a.strip():   # blank line must remain blank
-            if b.strip() != "":
-                logging.warning(f"Line {i+1}: expected blank line; returning baseline.")
-                return base_text
-            continue
-
-        ma = ts_pat.match(a)
-        mb = ts_pat_named.match(b)
-        if not ma or not mb:
-            logging.warning(f"Line {i+1}: timestamp/speaker tag mismatch; returning baseline.")
-            return base_text
-
-        # timestamps must be identical
-        if ma.groups()[:3] != mb.groups()[:3]:
-            logging.warning(f"Line {i+1}: timestamp changed; returning baseline.")
-            return base_text
-
-        in_label = ma.group(4)   # baseline Speaker token (e.g., A)
-        out_label = mb.group(4)  # output Speaker token (e.g., B)
-
-        # Establish or verify bijection mapping
-        if in_label not in label_map_in2out:
-            if out_label in label_map_out2in and label_map_out2in[out_label] != in_label:
-                logging.warning(f"Line {i+1}: non-bijective relabeling; returning baseline.")
-                return base_text
-            label_map_in2out[in_label] = out_label
-            label_map_out2in[out_label] = in_label
-        else:
-            if label_map_in2out[in_label] != out_label:
-                logging.warning(f"Line {i+1}: inconsistent relabeling; returning baseline.")
-                return base_text
-
-# All good — keep GPT output with appended names (and possibly swapped labels)
-return out or base_text
 
 
 
@@ -430,6 +437,7 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
+
 
 
 
