@@ -144,6 +144,107 @@ def _postfix_single_unknown_with_single_candidate(out_text: str, candidates: lis
     )
     return fix_pat.sub(rf"\1{chosen}\2", out_text)
 
+_ADDR_PAT = re.compile(
+    r"\b(?:Well|Yes|No|Right|Thanks|Thank you|Look|Listen|Okay|Ok|So|Alright),\s+"
+    r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b"
+)
+
+_NAME_TAG_PAT = re.compile(
+    r'^(\[\d{2}:\d{2}:\d{2}\]\s+Speaker\s+(\S+))(\s*\(([^)]+)\))?(:)(.*)$'
+)
+
+def _collect_addressed_names(text: str) -> List[str]:
+    """Return a de-duped list of names that appear as being addressed."""
+    names = _ADDR_PAT.findall(text)
+    # keep order, dedupe
+    seen = set(); out = []
+    for n in names:
+        if n not in seen:
+            seen.add(n); out.append(n)
+    return out
+
+def _fill_missing_name_adaptively(base_text: str, out_text: str, candidates: List[str]) -> str:
+    """
+    If exactly two labels are present and only one has a confident name,
+    infer the other from addressed-name frequency and intro mentions.
+    Only fills when unambiguous; otherwise leaves output unchanged.
+    """
+    # label -> assigned name (from out_text), and all labels
+    label_to_name: dict[str, str] = {}
+    labels: set[str] = set()
+    lines = out_text.splitlines()
+
+    for ln in lines:
+        m = _NAME_TAG_PAT.match(ln)
+        if not m:
+            continue
+        label = m.group(2)
+        labels.add(label)
+        name = (m.group(4) or "").strip()
+        # treat explicit names other than "Unknown" as confident
+        if name and name.lower() != "unknown":
+            label_to_name[label] = name
+
+    # need exactly two labels
+    if len(labels) != 2:
+        return out_text
+
+    # exactly one confidently named label?
+    unnamed = [lab for lab in labels if lab not in label_to_name]
+    if len(unnamed) != 1:
+        return out_text
+    named_label = next(iter(set(labels) - set(unnamed)))
+    other_label = unnamed[0]
+
+    # Build a frequency map of addressed names on lines spoken by the OTHER label.
+    # Use OUT lines (same line structure) to know which label is speaking.
+    freq: dict[str, int] = {}
+    for ln in lines:
+        m = _NAME_TAG_PAT.match(ln)
+        if not m:
+            continue
+        label = m.group(2)
+        if label != other_label:
+            continue
+        for name in _ADDR_PAT.findall(ln):
+            freq[name] = freq.get(name, 0) + 1
+
+    # restrict to candidates if you like
+    cand_set = set(candidates or [])
+    if cand_set:
+        freq = {n: c for n, c in freq.items() if n in cand_set}
+
+    if not freq:
+        return out_text
+
+    # choose the most frequent addressed name, but avoid picking the already-named person
+    already_named = {label_to_name[named_label]}
+    best_name, best_count = None, 0
+    for n, c in freq.items():
+        if n in already_named:
+            continue
+        if c > best_count:
+            best_name, best_count = n, c
+
+    if not best_name:
+        return out_text
+
+    # Rewrite lines for the other_label that are missing or say (Unknown) -> add (best_name)
+    new_lines = []
+    for ln in lines:
+        m = _NAME_TAG_PAT.match(ln)
+        if not m:
+            new_lines.append(ln); continue
+        pre, label, paren, name, colon, rest = m.groups()
+        if label == other_label:
+            if not name or name.lower() == "unknown":
+                ln = f"{pre} ({best_name}){colon}{rest}"
+        new_lines.append(ln)
+
+    return "\n".join(new_lines)
+
+
+
 
 def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, speaker_hint: str | None) -> str:
     """
@@ -398,6 +499,13 @@ Use these short samples to inform your guesses (do not copy these into the outpu
             label_map_in2out[in_label] = out_label
             label_map_out2in[out_label] = in_label
 
+
+        # Build the candidate list you already compute:
+        candidates_list = [c.strip() for c in (candidate_block.split(",") if candidate_block else []) if c.strip()]
+
+        # Adaptively fill missing name for the other label (if unambiguous)
+        out = _fill_missing_name_adaptively(base_text, out, candidates_list)
+
         return out or base_text
 
     except Exception as e:
@@ -535,3 +643,4 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
+
