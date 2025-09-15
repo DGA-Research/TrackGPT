@@ -265,10 +265,10 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
     logging.debug("candidates=%s", candidate_block)
     logging.debug("role_hints=%s", role_hint_block)
 
-# ---- Multi-speaker: GPT name guessing with STRICT preservation ----
-client = openai.OpenAI(api_key=openai_key)
+    # ---- Multi-speaker: GPT name guessing with STRICT preservation ----
+    client = openai.OpenAI(api_key=openai_key)
 
-system_prompt = f"""
+    system_prompt = f"""
 You must preserve the input transcript EXACTLY:
 - Do NOT change or remove timestamps like [HH:MM:SS].
 - Do NOT merge, split, reorder, or wrap lines.
@@ -296,75 +296,75 @@ Use these short samples to inform your guesses (do not copy these into the outpu
 -----
 """.strip()
 
-try:
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": base_text}
-        ],
-        temperature=0.0
-    )
-    out = (resp.choices[0].message.content or "").strip()
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": base_text}
+            ],
+            temperature=0.0
+        )
+        out = (resp.choices[0].message.content or "").strip()
 
-    # Debug snapshots to pinpoint mismatches quickly
-    logger.debug("---- BASE (first 6 lines) ----\n%s", "\n".join(base_text.splitlines()[:6]))
-    logger.debug("---- OUT  (first 6 lines) ----\n%s", "\n".join(out.splitlines()[:6]))
-    logger.debug("Candidates: %s", candidate_block)
-    logger.debug("Role hints:\n%s", role_hint_block)
+        # Debug snapshots to pinpoint mismatches quickly
+        logger.debug("---- BASE (first 6 lines) ----\n%s", "\n".join(base_text.splitlines()[:6]))
+        logger.debug("---- OUT  (first 6 lines) ----\n%s", "\n".join(out.splitlines()[:6]))
+        logger.debug("Candidates: %s", candidate_block)
+        logger.debug("Role hints:\n%s", role_hint_block)
 
-    # ---- Safety validation with allowed relabeling (bijection mapping) ----
-    base_lines = base_text.splitlines()
-    out_lines  = out.splitlines()
-    if len(base_lines) != len(out_lines):
-        logger.warning("Name guessing changed line count; returning baseline.")
-        return base_text
+        # ---- Safety validation with allowed relabeling (bijection mapping) ----
+        base_lines = base_text.splitlines()
+        out_lines  = out.splitlines()
+        if len(base_lines) != len(out_lines):
+            logger.warning("Name guessing changed line count; returning baseline.")
+            return base_text
 
-    ts_pat       = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):")
-    ts_pat_named = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*(\([^)]+\))?:")
+        ts_pat       = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):")
+        ts_pat_named = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*(\([^)]+\))?:")
 
-    label_map_in2out: dict[str, str] = {}
-    label_map_out2in: dict[str, str] = {}
+        label_map_in2out: dict[str, str] = {}
+        label_map_out2in: dict[str, str] = {}
 
-    for i, (a, b) in enumerate(zip(base_lines, out_lines), 1):
-        if not a.strip():   # blank line must remain blank
-            if b.strip() != "":
-                logger.warning("Line %d: expected blank line; returning baseline.", i)
+        for i, (a, b) in enumerate(zip(base_lines, out_lines), 1):
+            if not a.strip():   # blank line must remain blank
+                if b.strip() != "":
+                    logger.warning("Line %d: expected blank line; returning baseline.", i)
+                    return base_text
+                continue
+
+            ma = ts_pat.match(a)
+            mb = ts_pat_named.match(b)
+            if not ma or not mb:
+                logger.warning("Line %d: timestamp/speaker tag mismatch.\nBASE:%r\nOUT :%r", i, a, b)
                 return base_text
-            continue
 
-        ma = ts_pat.match(a)
-        mb = ts_pat_named.match(b)
-        if not ma or not mb:
-            logger.warning("Line %d: timestamp/speaker tag mismatch.\nBASE:%r\nOUT :%r", i, a, b)
-            return base_text
+            # timestamps must be identical
+            if ma.groups()[:3] != mb.groups()[:3]:
+                logger.warning("Line %d: timestamp changed.\nBASE:%r\nOUT :%r", i, a, b)
+                return base_text
 
-        # timestamps must be identical
-        if ma.groups()[:3] != mb.groups()[:3]:
-            logger.warning("Line %d: timestamp changed.\nBASE:%r\nOUT :%r", i, a, b)
-            return base_text
+            in_label  = ma.group(4)
+            out_label = mb.group(4)
 
-        in_label  = ma.group(4)
-        out_label = mb.group(4)
+            # bijection check
+            prev_out = label_map_in2out.get(in_label)
+            prev_in  = label_map_out2in.get(out_label)
+            if prev_out and prev_out != out_label:
+                logger.warning("Line %d: inconsistent relabeling %r->%r (saw %r).", i, in_label, out_label, prev_out)
+                return base_text
+            if prev_in and prev_in != in_label:
+                logger.warning("Line %d: non-bijective relabeling %r <- %r (saw %r).", i, out_label, in_label, prev_in)
+                return base_text
 
-        # bijection check
-        prev_out = label_map_in2out.get(in_label)
-        prev_in  = label_map_out2in.get(out_label)
-        if prev_out and prev_out != out_label:
-            logger.warning("Line %d: inconsistent relabeling %r->%r (saw %r).", i, in_label, out_label, prev_out)
-            return base_text
-        if prev_in and prev_in != in_label:
-            logger.warning("Line %d: non-bijective relabeling %r <- %r (saw %r).", i, out_label, in_label, prev_in)
-            return base_text
+            label_map_in2out[in_label] = out_label
+            label_map_out2in[out_label] = in_label
 
-        label_map_in2out[in_label] = out_label
-        label_map_out2in[out_label] = in_label
+        return out or base_text
 
-    return out or base_text
-
-except Exception as e:
-    logger.warning("Name guessing step failed; returning baseline. Error: %s", e)
-    return base_text
+    except Exception as e:
+        logger.warning("Name guessing step failed; returning baseline. Error: %s", e)
+        return base_text
 
 
 
@@ -500,5 +500,6 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
+
 
 
