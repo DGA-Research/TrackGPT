@@ -1,7 +1,6 @@
 import os
 import math
 import subprocess
-import logging
 import openai
 import time
 import sys
@@ -20,6 +19,22 @@ logger = logging.getLogger(__name__)
 # Constants
 CHUNK_SIZE_LIMIT = 24 * 1024 * 1024  # 24 MB
 DEFAULT_OVERLAP_SECONDS = 2
+
+
+def _clean_hint_name(hint: str | None) -> str | None:
+    """Pick a simple display name from speaker_hint like 'Donald Trump; Charles Payne'."""
+    if not hint:
+        return None
+    # take first non-empty token split on ; , / ' and ' etc.
+    parts = re.split(r"[;,/]| and | with | vs ", hint, flags=re.IGNORECASE)
+    for p in parts:
+        name = p.strip()
+        if name:
+            # collapse inner whitespace
+            return re.sub(r"\s+", " ", name)
+    return None
+
+
 
 def format_timestamp(ms: int | float) -> str:
     total_seconds = int(round(ms / 1000.0))
@@ -124,15 +139,6 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
         logging.error("No segments produced from utterances, paragraphs, or words.")
         return (transcript.text or "").strip()
 
-
-
-
-
-
-
-
-
-
     # ---- Normalize speaker ids to letter labels (A, B, C, ...) ----
     # Build a stable mapping so the same numeric diarization id always becomes the same letter
     speaker_list = sorted(list(unique_speakers), key=lambda x: (isinstance(x, str), x))
@@ -156,11 +162,28 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
         lines.append("")  # blank line between segments
     base_text = "\n".join(lines).strip()
 
-    # ---- If single speaker, DONE (no GPT so we never lose formatting) ----
-    if len(unique_speakers) <= 1:
-        return base_text
+    # ---- If single speaker, append a deterministic name so UI can parse ----
+    if len(unique_speakers) == 1:
+        single_label = segments[0]["spk_label"]  # e.g., "A" or "1"
+        display_name = _clean_hint_name(speaker_hint) or "Unknown"
 
-    # ---- Build tiny "voice profiles" per speaker to help accurate naming ----
+        # Transform every "Speaker {label}:" to "Speaker {label} (Name):"
+        # Keep timestamps, text, and blank lines exactly as-is.
+        out_lines = []
+        pat = re.compile(rf"^(\[\d{{2}}:\d{{2}}:\d{{2}}\]\s+Speaker\s+{re.escape(single_label)})(:)")
+        for line in base_text.splitlines():
+            if not line.strip():
+                out_lines.append(line)
+                continue
+            m = pat.match(line)
+            if m:
+                out_lines.append(f"{m.group(1)} ({display_name}){m.group(2)}{line[m.end():]}")
+            else:
+                # Non-dialog lines (shouldn't occur, but be robust)
+                out_lines.append(line)
+        return "\n".join(out_lines)
+        
+
     # ---- Build tiny "voice profiles" per speaker to help accurate naming ----
     by_label: dict[str, list[str]] = {}
     for seg in segments:
@@ -232,10 +255,8 @@ Rules:
             logging.warning("Name guessing changed line count; returning baseline.")
             return base_text
 
-        ts_pat = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+([A-Za-z0-9]+):")
-        ts_pat_named = re.compile(
-            r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+([A-Za-z0-9]+)\s*(\([^)]+\))?:"
-        )
+        ts_pat = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):")
+        ts_pat_named = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*(\([^)]+\))?:")
 
         for i, (a, b) in enumerate(zip(base_lines, out_lines)):
             if not a.strip():   # blank line in base must remain blank
@@ -392,6 +413,7 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
+
 
 
 
