@@ -1,42 +1,32 @@
-# transcriber.py
 import os
-import sys
 import math
-import time
-import re
-import json
-import string
-import tempfile
-import logging
 import subprocess
-from pathlib import Path
-from typing import Optional, List, Dict, Any
-
-import assemblyai as aai
 import openai
+import time
+import sys
+from pathlib import Path
+import tempfile
+import assemblyai as aai
+import logging
+from typing import List
+import re
+import string
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------
 # Constants
-# ---------------------------------------
 CHUNK_SIZE_LIMIT = 24 * 1024 * 1024  # 24 MB
 DEFAULT_OVERLAP_SECONDS = 2
 
 
-# ---------------------------------------
-# Utilities
-# ---------------------------------------
-def _clean_hint_name(hint: Optional[str]) -> Optional[str]:
+def _clean_hint_name(hint: str | None) -> str | None:
     """Pick a simple display name from speaker_hint like 'Donald Trump; Charles Payne'."""
     if not hint:
         return None
-    # take first non-empty token split on ; , / ' and ' etc.
     parts = re.split(r"[;,/]| and | with | vs ", hint, flags=re.IGNORECASE)
     for p in parts:
         name = p.strip()
         if name:
-            # collapse inner whitespace
             return re.sub(r"\s+", " ", name)
     return None
 
@@ -68,15 +58,94 @@ def _bucket_words_to_segments(words, bucket_ms: int = 8000) -> list[dict]:
     return segs
 
 
-# ---------------------------------------
-# Main entry
-# ---------------------------------------
-def transcribe_file(
-    audio_file_path: str,
-    openai_key: str,
-    assemblyai_key: str,
-    speaker_hint: Optional[str],
-) -> str:
+# --- Name harvesting helpers (flexible, avoids generic tokens) ---
+
+# Basic proper-name token: Smith, O'Neil, Mary-Jane
+NAME = r"[A-Z][a-z]+(?:[-'][A-Z][a-z]+)?"
+# Intro full names must have at least two tokens (e.g., "Tomi Lahren", "Charles Payne")
+INTRO_FULLNAME = rf"{NAME}\s+{NAME}(?:\s+{NAME})?"
+
+# Stoplist of generic capitalized tokens common in TV intros / filler
+BLOCKLIST = {
+    "fox", "news", "turning", "point", "usa", "founder", "host",
+    "contributor", "commentator",
+    "joining", "welcome", "now", "tonight", "breaking", "live",
+    "us", "me", "back", "thanks", "thank", "you", "okay", "ok",
+    "alright", "right", "so", "look", "listen",
+}
+
+def _is_ok_name(s: str) -> bool:
+    w = s.strip().lower()
+    if w in BLOCKLIST:
+        return False
+    toks = [t.lower() for t in s.split()]
+    if all(t in BLOCKLIST for t in toks):
+        return False
+    return True
+
+
+# Scrub obviously wrong assigned names like "(Joining)" -> "(Unknown)"
+BAD_NAME_RE = re.compile(
+    r"^(?:"
+    r"joining|welcome|now|tonight|breaking|live|thanks|thank you|thank|you|"
+    r"okay|ok|alright|right|back|so|look|listen|us|me"
+    r")$",
+    re.IGNORECASE,
+)
+
+def _scrub_bad_assigned_names(text: str) -> str:
+    # Replace "(Joining)"-style names with "(Unknown)" but preserve everything else EXACTLY.
+    pattern = re.compile(r"^(\[\d{2}:\d{2}:\d{2}\]\s+Speaker\s+\S+\s*\()([^)]+)(\):)", re.M)
+
+    def repl(m: re.Match) -> str:
+        name = m.group(2).strip()
+        if BAD_NAME_RE.match(name):
+            return f"{m.group(1)}Unknown{m.group(3)}"
+        return m.group(0)
+
+    return pattern.sub(repl, text)
+
+
+def _postfix_single_unknown_with_single_candidate(out_text: str, candidates: list[str]) -> str:
+    """
+    If exactly one speaker label has '(Unknown)' and exactly one candidate name is unused,
+    replace that Unknown with the candidate. Keeps everything else identical.
+    """
+    line_pat = re.compile(
+        r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*\(([^)]+)\):",
+        re.M,
+    )
+    used_names = set()
+    labels_with_unknown = set()
+
+    for m in line_pat.finditer(out_text):
+        label = m.group(4)
+        name = m.group(5).strip()
+        if name.lower() == "unknown":
+            labels_with_unknown.add(label)
+        else:
+            used_names.add(name.lower())
+
+    if len(labels_with_unknown) != 1:
+        return out_text
+
+    # pick a candidate that isn't already used and not blocked
+    viable = [c for c in candidates if _is_ok_name(c) and c.lower() not in used_names]
+    if len(viable) != 1:
+        return out_text
+
+    label_to_fix = next(iter(labels_with_unknown))
+    chosen = viable[0]
+
+    # Replace only "(Unknown)" for this specific label
+    fix_pat = re.compile(
+        rf"^(\[\d{{2}}:\d{{2}}:\d{{2}}\]\s+Speaker\s+{re.escape(label_to_fix)}\s*\()Unknown(\):)",
+        re.M,
+    )
+    return fix_pat.sub(rf"\1{chosen}\2", out_text)
+
+
+def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, speaker_hint: str | None) -> str:
     """
     Returns a timecoded transcript as plain text:
         [HH:MM:SS] Speaker N: text
@@ -89,10 +158,9 @@ def transcribe_file(
     # ---- AssemblyAI transcription ----
     aai.settings.api_key = assemblyai_key
     config = aai.TranscriptionConfig(
-        speaker_labels=True,   # diarization
+        speaker_labels=True,
         punctuate=True,
         disfluencies=True,
-        # AssemblyAI SDK returns words by default in recent versions
     )
     transcript = aai.Transcriber().transcribe(audio_file_path, config)
 
@@ -100,7 +168,6 @@ def transcribe_file(
     segments: list[dict] = []
     unique_speakers: set[int] = set()
 
-    # Preferred path: utterances (have speaker id + timings)
     if getattr(transcript, "utterances", None):
         for u in transcript.utterances:
             txt = (u.text or "").strip()
@@ -111,7 +178,6 @@ def transcribe_file(
             if dur <= 30000:  # <= 30s keep intact
                 segments.append({"start": u.start, "end": u.end, "text": txt, "spk": u.speaker})
             else:
-                # break long utterances into ~30s chunks by density
                 words = txt.split()
                 if not words:
                     continue
@@ -124,7 +190,6 @@ def transcribe_file(
                         segments.append({"start": t0, "end": min(u.end, t0 + 30000), "text": chunk, "spk": u.speaker})
                         t0 += 30000
 
-    # Fallback: paragraphs (if SDK exposes them)
     if not segments:
         paras = []
         try:
@@ -140,7 +205,6 @@ def transcribe_file(
                     continue
                 segments.append({"start": p.start, "end": p.end, "text": txt, "spk": 0})
 
-    # Last resort: bucket words (~8s)
     if not segments:
         words = getattr(transcript, "words", None) or []
         segs = _bucket_words_to_segments(words, bucket_ms=8000)
@@ -148,20 +212,17 @@ def transcribe_file(
         for s in segs:
             segments.append({"start": s["start"], "end": s["end"], "text": s["text"], "spk": 0})
 
-    # If still nothing, return raw text to avoid crashing
     if not segments:
         logger.error("No segments produced from utterances, paragraphs, or words.")
         return (transcript.text or "").strip()
 
-    # ---- Normalize speaker ids by first appearance to A, B, C... (stable order) ----
-    label_map: dict[int, str] = {}
+    # ---- Normalize speaker ids by first appearance to A, B, C... ----
+    label_map = {}
     next_letter_idx = 0
     for s in segments:
         spk = s["spk"]
         if spk not in label_map:
-            label_map[spk] = (
-                string.ascii_uppercase[next_letter_idx] if next_letter_idx < 26 else f"S{next_letter_idx+1}"
-            )
+            label_map[spk] = string.ascii_uppercase[next_letter_idx] if next_letter_idx < 26 else f"S{next_letter_idx+1}"
             next_letter_idx += 1
         s["spk_label"] = label_map[spk]
 
@@ -177,27 +238,7 @@ def transcribe_file(
         lines.append("")  # blank line between segments
     base_text = "\n".join(lines).strip()
 
-    # ---- Single-speaker early-exit: deterministic name if hint provided ----
-    if len(set(label_map.values())) == 1:
-        single_label = segments[0]["spk_label"]  # e.g., "A"
-        display_name = _clean_hint_name(speaker_hint) or "Unknown"
-        out_lines = []
-        pat = re.compile(rf"^(\[\d{{2}}:\d{{2}}:\d{{2}}\]\s+Speaker\s+{re.escape(single_label)})(:)")
-        for line in base_text.splitlines():
-            if not line.strip():
-                out_lines.append(line)
-                continue
-            m = pat.match(line)
-            if m:
-                out_lines.append(f"{m.group(1)} ({display_name}){m.group(2)}{line[m.end():]}")
-            else:
-                out_lines.append(line)
-        return "\n".join(out_lines)
-
-    # --------------------------------------------------------------------
-    # Multi-speaker: harvest candidate names + role hints + hypotheses
-    # --------------------------------------------------------------------
-    # First non-blank line (often the host intro)
+    # ---- Harvest lightweight cues for names/roles ----
     first_talking_line = next((ln for ln in base_text.splitlines() if ln.strip()), "")
 
     looks_like_host_intro = bool(re.search(
@@ -206,83 +247,53 @@ def transcribe_file(
         re.I,
     ))
 
-    # --- More permissive name patterns
-    NAME = r"[A-Z][a-z]+(?:[-'][A-Z][a-z]+)?"
-    FULLNAME = rf"{NAME}(?:\s+{NAME}){{0,2}}"              # 1 to 3 tokens
-    mentioned_in_intro = re.findall(rf"\b({FULLNAME})\b", first_talking_line)
+    # Require >=2 tokens for intro names to avoid "Joining"
+    mentioned_in_intro = re.findall(rf"\b({INTRO_FULLNAME})\b", first_talking_line)
+    mentioned_in_intro = [n for n in mentioned_in_intro if _is_ok_name(n)]
 
-    # crude filter of capitalized non-names; tune as needed
-    blocklist = {"fox", "news", "turning", "point", "usa", "founder", "host", "contributor", "commentator"}
-    mentioned_in_intro = [
-        n for n in mentioned_in_intro
-        if 1 <= len(n.split()) <= 3 and n.lower() not in blocklist
-    ]
+    # Names addressed like "Well, Liz," anywhere in the body
+    addressed_names = re.findall(r"\bWell,\s+([A-Z][a-zA-Z]+)\b", base_text)
+    addressed_names = [n for n in dict.fromkeys(addressed_names) if _is_ok_name(n)]  # dedupe + filter
 
-    # names addressed later ("Well, Liz," "Thanks, Liz,")
-    addressed_names = re.findall(rf"\b(?:Well|Thanks|Thank you|So|Look|Listen),\s+({NAME})\b", base_text)
-    addressed_names = list(dict.fromkeys(addressed_names))
+    # Capitalized tokens followed by comma (e.g., "Liz,")
+    comma_names = re.findall(r"\b([A-Z][a-zA-Z]+),", base_text)
+    comma_names = [n for n in dict.fromkeys(comma_names) if _is_ok_name(n)]
 
-    # other Name, patterns
-    comma_names = re.findall(rf"\b({NAME}),", base_text)
-
+    # Merge auto candidates + user hint
     auto_candidates = mentioned_in_intro + addressed_names + comma_names
-
-    # merge with user-provided candidates
     if speaker_hint:
         for tok in re.split(r"[;,/]| and | vs | with ", speaker_hint, flags=re.I):
             tok = tok.strip()
             if tok:
                 auto_candidates.append(tok)
 
-    # dedupe & trim (keep order)
+    # dedupe & trim
     candidates = list(dict.fromkeys(auto_candidates))[:8]
     candidate_block = ", ".join(candidates) if candidates else "None"
 
-    # soft role hints + hypotheses
-    role_hints: list[str] = []
-    speaker_hypotheses: list[str] = []
-
+    role_hints = []
     if looks_like_host_intro:
         role_hints.append(
             "If the first line is an intro (e.g., 'Joining us now', 'We’re joined by'), "
-            "that line is the HOST speaking. Any full name mentioned there refers to a different speaker (the guest)."
+            "that line is the HOST speaking. Any person named in that line is a different speaker (the guest)."
         )
-
+    if mentioned_in_intro:
+        role_hints.append(
+            "Names explicitly mentioned in the intro line (likely guests): "
+            + ", ".join(mentioned_in_intro) + "."
+        )
     if addressed_names:
         role_hints.append(
-            "When a line begins with 'Well, NAME,' or 'Thanks, NAME,', NAME is being addressed (the other speaker), "
+            "If a line begins with 'Well, NAME,', NAME is being addressed (the other speaker), "
             "not the current line's speaker."
         )
-
-    if looks_like_host_intro and mentioned_in_intro:
-        m = re.match(r"^(\[\d{2}:\d{2}:\d{2}\]\s+Speaker\s+(\S+):)", first_talking_line)
-        if m:
-            host_label = m.group(2)
-            speaker_hypotheses.append(
-                f"Likely host label: {host_label}. Names in the intro (likely guests): {', '.join(mentioned_in_intro)}."
-            )
-
-    if addressed_names:
-        speaker_hypotheses.append(
-            "Names addressed with a comma (e.g., 'Well, Liz,') are likely the other speaker's name."
-        )
-
     role_hint_block = "\n".join(role_hints) if role_hints else "No extra role hints."
-    speaker_hypotheses_block = "\n".join(speaker_hypotheses) if speaker_hypotheses else "No label/name hypotheses."
 
-    logger.debug("Intro names: %s", mentioned_in_intro)
-    logger.debug("Addressed names: %s", addressed_names)
-    logger.debug("Comma names: %s", comma_names)
-    logger.debug("Candidates: %s", candidate_block)
-    logger.debug("Role hints:\n%s", role_hint_block)
-    logger.debug("Speaker hypotheses:\n%s", speaker_hypotheses_block)
+    logger.debug("candidates=%s", candidate_block)
+    logger.debug("role_hints=%s", role_hint_block)
 
-    # --------------------------------------------------------------------
-    # GPT name guessing with STRICT preservation
-    # --------------------------------------------------------------------
+    # ---- Multi-speaker: GPT name guessing with STRICT preservation ----
     client = openai.OpenAI(api_key=openai_key)
-
-    profile_block = _build_profile_block(segments)
 
     system_prompt = f"""
 You must preserve the input transcript EXACTLY:
@@ -306,12 +317,14 @@ Rules:
 Additional disambiguation hints (follow strictly):
 {role_hint_block}
 
-Label/name hypotheses (use for guidance; keep labels exactly as provided in the input):
-{speaker_hypotheses_block}
-
 Use these short samples to inform your guesses (do not copy these into the output):
 -----
-{profile_block}
+{ "\n\n".join([
+    f"Speaker {lab} samples:\n" + "\n".join(
+        [f"[{format_timestamp(seg['start'])}] {seg['text']}" for seg in segments if seg['spk_label'] == lab][:2]
+    ) or "(no sample)"
+    for lab in sorted(set(s['spk_label'] for s in segments))
+]) }
 -----
 """.strip()
 
@@ -320,31 +333,39 @@ Use these short samples to inform your guesses (do not copy these into the outpu
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": base_text},
+                {"role": "user", "content": base_text}
             ],
-            temperature=0.0,
+            temperature=0.0
         )
         out = (resp.choices[0].message.content or "").strip()
 
-        # Debug snapshots to pinpoint mismatches quickly
+        # 1) Scrub obviously wrong names like "(Joining)"
+        out = _scrub_bad_assigned_names(out)
+
+        # 2) Optional: if there is exactly one Unknown and exactly one unused candidate, fill it
+        out = _postfix_single_unknown_with_single_candidate(out, candidates)
+
+        # Debug snapshots
         logger.debug("---- BASE (first 6 lines) ----\n%s", "\n".join(base_text.splitlines()[:6]))
         logger.debug("---- OUT  (first 6 lines) ----\n%s", "\n".join(out.splitlines()[:6]))
+        logger.debug("Candidates: %s", candidate_block)
+        logger.debug("Role hints:\n%s", role_hint_block)
 
         # ---- Safety validation with allowed relabeling (bijection mapping) ----
         base_lines = base_text.splitlines()
-        out_lines = out.splitlines()
+        out_lines  = out.splitlines()
         if len(base_lines) != len(out_lines):
             logger.warning("Name guessing changed line count; returning baseline.")
             return base_text
 
-        ts_pat = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):")
+        ts_pat       = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):")
         ts_pat_named = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*(\([^)]+\))?:")
 
         label_map_in2out: dict[str, str] = {}
         label_map_out2in: dict[str, str] = {}
 
         for i, (a, b) in enumerate(zip(base_lines, out_lines), 1):
-            if not a.strip():  # blank line must remain blank
+            if not a.strip():   # blank line must remain blank
                 if b.strip() != "":
                     logger.warning("Line %d: expected blank line; returning baseline.", i)
                     return base_text
@@ -361,12 +382,12 @@ Use these short samples to inform your guesses (do not copy these into the outpu
                 logger.warning("Line %d: timestamp changed.\nBASE:%r\nOUT :%r", i, a, b)
                 return base_text
 
-            in_label = ma.group(4)
+            in_label  = ma.group(4)
             out_label = mb.group(4)
 
             # bijection check
             prev_out = label_map_in2out.get(in_label)
-            prev_in = label_map_out2in.get(out_label)
+            prev_in  = label_map_out2in.get(out_label)
             if prev_out and prev_out != out_label:
                 logger.warning("Line %d: inconsistent relabeling %r->%r (saw %r).", i, in_label, out_label, prev_out)
                 return base_text
@@ -377,51 +398,6 @@ Use these short samples to inform your guesses (do not copy these into the outpu
             label_map_in2out[in_label] = out_label
             label_map_out2in[out_label] = in_label
 
-        # ---------- Conservative post-fix for a single Unknown ----------
-        def collect_names_used(out_text: str) -> dict[str, str]:
-            # Map label -> chosen name (if any)
-            m: dict[str, str] = {}
-            for line in out_text.splitlines():
-                m2 = re.match(r"^\[\d{2}:\d{2}:\d{2}\]\s+Speaker\s+(\S+)\s*\(([^)]+)\):", line)
-                if m2:
-                    lbl, nm = m2.group(1), m2.group(2).strip()
-                    if nm and nm.lower() != "unknown":
-                        m[lbl] = nm
-            return m
-
-        used_map = collect_names_used(out)
-        unknown_labels = set()
-        all_labels = set()
-
-        for line in base_text.splitlines():
-            m = re.match(r"^\[\d{2}:\d{2}:\d{2}\]\s+Speaker\s+(\S+):", line)
-            if m:
-                all_labels.add(m.group(1))
-
-        for lbl in all_labels:
-            if lbl not in used_map:
-                # check if this label ever got a (...):
-                if re.search(rf"^\[\d{{2}}:\d{{2}}:\d{{2}}\]\s+Speaker\s+{re.escape(lbl)}\s*\(Unknown\):", out, re.M):
-                    unknown_labels.add(lbl)
-
-        if len(unknown_labels) == 1:
-            # build preferred candidate list: addressed_names, then mentioned_in_intro, then comma_names
-            priority = addressed_names + mentioned_in_intro + comma_names
-            priority = list(dict.fromkeys(priority))  # dedupe while preserving order
-
-            used_names_lower = {v.lower() for v in used_map.values()}
-            priority = [p for p in priority if p.lower() not in used_names_lower]
-
-            if len(priority) == 1:
-                lbl = next(iter(unknown_labels))
-                fix_name = priority[0]  # e.g., "Liz"
-                out = re.sub(
-                    rf"^(\[\d{{2}}:\d{{2}}:\d{{2}}\]\s+Speaker\s+{re.escape(lbl)}\s*)\((?:Unknown)\)(:)",
-                    rf"\1({fix_name})\2",
-                    out,
-                    flags=re.M,
-                )
-
         return out or base_text
 
     except Exception as e:
@@ -429,32 +405,14 @@ Use these short samples to inform your guesses (do not copy these into the outpu
         return base_text
 
 
-def _build_profile_block(segments: list[dict]) -> str:
-    """Create short 'voice samples' per label to help the LLM guess names."""
-    by_label: dict[str, list[str]] = {}
-    for seg in segments:
-        lab = seg["spk_label"]
-        by_label.setdefault(lab, [])
-        if len(by_label[lab]) < 2 and len(seg["text"].split()) >= 6:
-            ts = format_timestamp(seg["start"])
-            by_label[lab].append(f"[{ts}] {seg['text']}")
-    profiles = []
-    for lab in sorted(by_label.keys()):
-        sample_text = "\n".join(by_label[lab]) if by_label[lab] else "(no sample)"
-        profiles.append(f"Speaker {lab} samples:\n{sample_text}")
-    return "\n\n".join(profiles) if profiles else "(no samples)"
+# ------------- Large-file chunking utilities (unchanged) ----------------
 
-
-# ---------------------------------------
-# Optional: large-file helper (unchanged)
-# ---------------------------------------
 def _transcribe_large_file(audio_path: str, model: str, overlap_seconds: int, file_size: int) -> str:
     """Handle transcription of large audio files by splitting into chunks."""
     try:
-        # Get total duration using ffprobe
         duration_cmd = [
-            "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1", audio_path,
+            'ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1', audio_path
         ]
         total_duration = float(subprocess.check_output(duration_cmd).decode().strip())
         logger.info(f"Total audio duration: {total_duration} seconds")
@@ -462,7 +420,6 @@ def _transcribe_large_file(audio_path: str, model: str, overlap_seconds: int, fi
         logger.error(f"Failed to get audio duration: {str(e)}")
         raise RuntimeError(f"Failed to get audio duration: {str(e)}")
 
-    # Calculate chunk parameters
     avg_bitrate = (file_size * 8) / total_duration
     max_chunk_duration = (CHUNK_SIZE_LIMIT * 8) / avg_bitrate * 0.95
     effective_chunk_duration = max(max_chunk_duration - overlap_seconds, 0.1)
@@ -484,19 +441,17 @@ def _transcribe_large_file(audio_path: str, model: str, overlap_seconds: int, fi
             chunk_path = _create_chunk_file(audio_path, start_time, end_time, i)
             temp_files_to_delete.append(chunk_path)
 
-            # Verify chunk size
             chunk_size = os.path.getsize(chunk_path)
             logger.debug(f"Chunk {i+1}: {start_time:.2f}-{end_time:.2f}s, size: {chunk_size} bytes")
             if chunk_size > CHUNK_SIZE_LIMIT:
                 logger.warning(f"Chunk {i+1} exceeds size limit: {chunk_size} bytes")
 
-            # Transcribe chunk (OpenAI Whisper-style endpoint)
             try:
                 logger.info(f"Transcribing chunk {i+1}/{num_chunks}")
                 with open(chunk_path, "rb") as chunk_file:
                     response = openai.audio.transcriptions.create(
                         model=model,
-                        file=chunk_file,
+                        file=chunk_file
                     )
                 transcripts.append(response.text)
                 logger.debug(f"Chunk {i+1} transcription successful, length: {len(response.text)}")
@@ -520,19 +475,14 @@ def _create_chunk_file(audio_path: str, start_time: float, end_time: float, inde
     chunk_path = Path(tempfile.gettempdir()) / f"{audio_path.stem}_part{index+1}{audio_path.suffix}"
 
     try:
-        subprocess.run(
-            [
-                "ffmpeg", "-y",
-                "-ss", str(start_time),
-                "-i", str(audio_path),
-                "-to", str(end_time),
-                "-c", "copy",
-                str(chunk_path),
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=True,
-        )
+        subprocess.run([
+            'ffmpeg', '-y',
+            '-ss', str(start_time),
+            '-i', str(audio_path),
+            '-to', str(end_time),
+            '-c', 'copy',
+            str(chunk_path)
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to create chunk {index+1}: {str(e)}")
         raise RuntimeError(f"Failed to create audio chunk: {str(e)}")
