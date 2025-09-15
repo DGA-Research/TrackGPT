@@ -24,7 +24,7 @@ from config import Config
 
 log = logging.getLogger(__name__)
 
-def _log_egress_ip(proxy_url: str | None):
+def _log_egress_ip(proxy_url: Optional[str]) -> None:
     try:
         handlers = []
         if proxy_url:
@@ -32,11 +32,9 @@ def _log_egress_ip(proxy_url: str | None):
         opener = urllib.request.build_opener(*handlers)
         with opener.open("https://api.ipify.org", timeout=5) as r:
             ip = r.read().decode("utf-8", "ignore")
-            log.info("Egress IP%s: %s", f" via proxy={bool(proxy_url)}" , ip)
+            log.info("Egress IP (via proxy=%s): %s", bool(proxy_url), ip)
     except Exception as e:
         log.debug("Egress IP check failed: %s", e)
-        
-
 
 # --- Dependency Checks ---
 try:
@@ -195,6 +193,8 @@ def _ensure_mp3(path_in: Path, path_out: Path) -> Optional[str]:
     return None
 
 # --- Helper: build attempt ladder ---
+from typing import Tuple as _TupleList  # alias just to emphasize Tuple use in return type
+
 def _build_attempts(
     yt_path: str,
     url: str,
@@ -203,6 +203,7 @@ def _build_attempts(
     prefer_format: str,
     geo_countries: List[str],
     supports_cookies: bool,
+    use_geo_bypass: bool,
 ) -> List[Tuple[str, List[str]]]:
     """
     Build a retry ladder that rotates:
@@ -211,7 +212,6 @@ def _build_attempts(
       - direct '-x' audio extraction
     """
     geo_list = geo_countries or ["US"]
-
     attempts: List[Tuple[str, List[str]]] = []
 
     for country in geo_list:
@@ -223,8 +223,9 @@ def _build_attempts(
             "--restrict-filenames",
             "-o", out_tmpl,
             "--force-ipv4",
-            "--geo-bypass", "--geo-bypass-country", country,
         ] + enrich
+        if use_geo_bypass:
+            base_common += ["--geo-bypass", "--geo-bypass-country", country]
 
         # Prefer grabbing a container stream first, then extract/convert if needed
         common_fmt = base_common + ["-f", prefer_format]
@@ -279,7 +280,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
 
     # --- Cookies & UA setup ---
     temp_paths_to_cleanup: List[str] = []
-    temp_cookies_file: Optional[str] = _materialize_cookies(temp_paths_to_cleanup)  # must exist above
+    temp_cookies_file: Optional[str] = _materialize_cookies(temp_paths_to_cleanup)
 
     cookies_from_browser = os.getenv(
         "YTDLP_COOKIES_FROM_BROWSER",
@@ -292,10 +293,10 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         "YTDLP_PROXY_URL",
         getattr(Config, "YTDLP_PROXY_URL", "") if hasattr(Config, "YTDLP_PROXY_URL") else ""
     ).strip()
-    
+
+    # Log egress IP (helps diagnose region blocks)
     _log_egress_ip(proxy_url or None)
 
-    
     # --- Metadata (no download) ---
     ydl_opts: Dict[str, Any] = {
         'quiet': True,
@@ -366,12 +367,15 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if geo_countries_cfg:
         geo_countries = [c.strip() for c in str(geo_countries_cfg).split(",") if c.strip()]
     else:
-        geo_countries_env = os.getenv("YTDLP_GEO_COUNTRIES", "US")
+        # Prefer Puerto Rico first, then US by default
+        geo_countries_env = os.getenv("YTDLP_GEO_COUNTRIES", "PR,US")
         geo_countries = [c.strip() for c in geo_countries_env.split(",") if c.strip()]
 
     supports_cookies = bool(temp_cookies_file or cookies_from_browser)
+    # If a proxy is supplied, let the proxy decide region; skip geo-bypass flags.
+    use_geo_bypass = not bool(proxy_url)
 
-    attempts = _build_attempts(  # must exist above
+    attempts = _build_attempts(
         yt_path=YT_DLP_PATH,
         url=url,
         out_tmpl=output_path_template,
@@ -379,6 +383,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         prefer_format="251/140/bestaudio/best",
         geo_countries=geo_countries,
         supports_cookies=supports_cookies,
+        use_geo_bypass=use_geo_bypass,
     )
 
     # --- Run attempts ---
@@ -409,7 +414,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                         if cand.suffix.lower() == ".mp3":
                             log.info("Success (%s) → %s", label, cand)
                             return (str(cand), {**metadata, "download_attempt": label})
-                        out = _ensure_mp3(cand, final_audio_path)  # must exist above
+                        out = _ensure_mp3(cand, final_audio_path)
                         if out:
                             log.info("Success (%s) + convert → %s", label, out)
                             return (out, {**metadata, "download_attempt": label})
@@ -446,4 +451,3 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
-
