@@ -20,94 +20,156 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE_LIMIT = 24 * 1024 * 1024  # 24 MB
 DEFAULT_OVERLAP_SECONDS = 2
 
-def format_timestamp(ms):
-    total_seconds = ms / 1000
-    hours = int(total_seconds // 3600)
-    minutes = int((total_seconds % 3600) // 60)
-    seconds = int(total_seconds % 60)
-    return f"{hours}:{minutes:02}:{seconds:02}"  # Always show HH:MM:SS.ss
+def format_timestamp(ms: int | float) -> str:
+    """Return HH:MM:SS with zero-padded hours."""
+    total_seconds = int(round(ms / 1000.0))
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+    return f"{hours:02}:{minutes:02}:{seconds:02}"
 
+def _bucket_words_to_segments(words: list, bucket_ms: int = 8000) -> list[dict]:
+    """
+    Group word timings into ~8s chunks when utterances/paragraphs
+    aren’t available. words: items with .start/.end/.text.
+    Returns [{'start':ms,'end':ms,'text':str}...]
+    """
+    words = words or []
+    if not words:
+        return []
+    segs, cur, cur_start = [], [], words[0].start
+    for w in words:
+        cur.append(w.text)
+        if (w.end - cur_start) >= bucket_ms:
+            segs.append({"start": cur_start, "end": w.end, "text": " ".join(cur)})
+            cur, cur_start = [], w.end
+    if cur:
+        segs.append({"start": cur_start, "end": words[-1].end, "text": " ".join(cur)})
+    return segs
 
-def transcribe_file(audio_file_path, openai_key, assemblyai_key, speaker):
-    aai.settings.api_key=assemblyai_key # replace with your actual key
+def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, speaker_hint: str | None):
+    """
+    Always returns timecoded text in the canonical form:
+       [HH:MM:SS] Speaker N: text
 
-    audio_file = audio_file_path
-
+    - Single speaker: returns timecoded text directly (no GPT involved).
+    - Multiple speakers: runs a strict GPT pass that ONLY appends a guessed
+      name in parentheses after "Speaker N" without changing timestamps or spacing.
+    """
+    # --- AssemblyAI transcription ---
+    aai.settings.api_key = assemblyai_key
     config = aai.TranscriptionConfig(
-        speaker_labels=True,
+        speaker_labels=True,   # diarization on
+        punctuate=True,
+        disfluencies=True,
+        # (paragraphs is NOT a valid config arg; see get_paragraphs() below)
+        # enable_words: not required; modern SDKs include words
     )
+    transcript = aai.Transcriber().transcribe(audio_file_path, config)
 
-    transcript = aai.Transcriber().transcribe(audio_file, config)
+    # --- Build canonical segments [{'start','end','text','spk'}] ---
+    segments: list[dict] = []
+    unique_speakers = set()
 
-    lines = []
+    # Preferred: utterances (have speaker IDs and timings)
+    if getattr(transcript, "utterances", None):
+        for u in transcript.utterances:
+            if not u.text:
+                continue
+            unique_speakers.add(u.speaker)
+            dur = u.end - u.start
+            if dur <= 30000:  # <= 30s keep intact
+                segments.append({"start": u.start, "end": u.end, "text": u.text.strip(), "spk": u.speaker})
+            else:
+                # break long utterances into ~30s chunks by word density
+                words = u.text.split()
+                if not words:
+                    continue
+                words_per_ms = max(1, len(words)) / max(1, dur)
+                step = max(1, int(words_per_ms * 30000))  # words per 30s
+                t0 = u.start
+                for i in range(0, len(words), step):
+                    chunk = " ".join(words[i:i+step]).strip()
+                    if chunk:
+                        segments.append({"start": t0, "end": min(u.end, t0 + 30000), "text": chunk, "spk": u.speaker})
+                        t0 += 30000
 
-    for utterance in transcript.utterances:
-        duration = utterance.end - utterance.start
-        
-        # If utterance is 30 seconds or less, keep as is
-        if duration <= 30000:  # 30 seconds in milliseconds
-            timestamp = format_timestamp(utterance.start)
-            lines.append(f"[{timestamp}] Speaker {utterance.speaker}: {utterance.text}")
-        else:
-            # Break up long utterances into 30-second chunks
-            text = utterance.text
-            words = text.split()
-            total_words = len(words)
-            
-            # Calculate words per millisecond
-            words_per_ms = total_words / duration
-            
-            # Calculate how many words fit in 30 seconds
-            words_per_30_sec = int(words_per_ms * 30000)
-            
-            # Split text into chunks
-            chunk_start_time = utterance.start
-            
-            for i in range(0, total_words, words_per_30_sec):
-                chunk_words = words[i:i + words_per_30_sec]
-                chunk_text = " ".join(chunk_words)
-                
-                timestamp = format_timestamp(chunk_start_time)
-                lines.append(f"[{timestamp}] Speaker {utterance.speaker}: {chunk_text}")
-                
-                # Update start time for next chunk
-                chunk_start_time += 30000  # Add 30 seconds
-    
-    lines1 = "\n".join(lines)
-    
-    # Set your OpenAI API key
-    client = openai.OpenAI(
-        api_key=openai_key)
+    # Fallback: paragraphs fetched AFTER transcription (no speaker IDs)
+    if not segments:
+        paras = []
+        try:
+            resp = transcript.get_paragraphs()  # SDK helper; returns object with .paragraphs
+            paras = getattr(resp, "paragraphs", []) or []
+        except Exception:
+            paras = []
+        if paras:
+            unique_speakers = {0}
+            for p in paras:
+                txt = (p.text or "").strip()
+                if txt:
+                    segments.append({"start": p.start, "end": p.end, "text": txt, "spk": 0})
 
-    # Input your transcript
-    transcript = lines1
+    # Last resort: bucket word timings into ~8s segments
+    if not segments:
+        words = getattr(transcript, "words", None) or []
+        segs = _bucket_words_to_segments(words, bucket_ms=8000)
+        unique_speakers = {0}
+        for s in segs:
+            segments.append({"start": s["start"], "end": s["end"], "text": s["text"], "spk": 0})
 
-    # System prompt for speaker labeling
+    # If absolutely nothing, return raw transcript text to avoid crashing
+    if not segments:
+        logging.error("No segments produced (utterances/paragraphs/words were all empty).")
+        return (transcript.text or "").strip()
+
+    # --- Render baseline with timestamps (Speaker N) ---
+    lines: list[str] = []
+    for seg in segments:
+        txt = (seg["text"] or "").strip()
+        if not txt:
+            continue
+        ts = format_timestamp(seg["start"])
+        spk = seg["spk"]
+        lines.append(f"[{ts}] Speaker {spk}: {txt}")
+        lines.append("")  # blank line between segments
+    base_text = "\n".join(lines).strip()
+
+    # Single speaker? Do NOT call GPT → preserves timestamps/spacing
+    if len(unique_speakers) <= 1:
+        return base_text
+
+    # --- Multi-speaker: GPT pass that ONLY appends a name in parentheses ---
+    client = openai.OpenAI(api_key=openai_key)
     system_prompt = f"""
-        You are a transcription assistant. Given a monologue-style transcript of a conversation or interview, your task is to assign speaker labels (e.g., A, B, C...) and make a guess who is talking (e.g. Speaker A (Barack Obama):). Place the speaker labels before each line as clearly as possible.
+You must preserve the INPUT EXACTLY:
+- Do NOT change or remove timestamps like [HH:MM:SS].
+- Do NOT merge, split, reorder, or wrap lines.
+- Do NOT remove blank lines.
+- Do NOT change anything after the colon on any line.
 
-        If there are multiple uknown speakers, differentiate them: Speaker A, Speaker B, etc. 
-            - Correct Example: Speaker A (Unknown A), Speaker B (Mary) Speaker C (Unknown B)
-            - Incorrect Example: Speaker A (Unknown), Speaker B (Mary), Speaker C (Unknown)
-        
-        Don't delete anything, just add guesses. Consider the spelling of {speaker}.
+Task: ONLY append a guessed name in parentheses immediately after "Speaker X".
+If unsure, use (Unknown). Keep Speaker numbering unchanged.
+Hint: {speaker_hint or 'None'}.
+""".strip()
 
-        Only add labels — DO NOT rephrase or summarize anything.
-        """
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": transcript}
-        ],
-        temperature=0.2
-    )
-
-    print("RETURNING")
-    print("LABELED TRANSCRIPT BY CHAT", response.choices[0].message.content)
-    # return the labeled transcript
-    return(response.choices[0].message.content)
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": base_text}
+            ],
+            temperature=0.0
+        )
+        out = (resp.choices[0].message.content or "").strip()
+        # Safety fallback if model deviates
+        if not out or "[" not in out or "Speaker " not in out:
+            return base_text
+        return out
+    except Exception as e:
+        logging.warning(f"Name-guessing step failed. Returning baseline. Error: {e}")
+        return base_text
+    
 
 def _transcribe_large_file(audio_path: str, model: str, overlap_seconds: int, file_size: int) -> str:
     """Handle transcription of large audio files by splitting into chunks."""
@@ -239,6 +301,8 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
+
+
 
 
 
