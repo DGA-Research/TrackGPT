@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 import assemblyai as aai
 import logging
-from typing import List
+from typing import List, Dict
 import re
 import string
 
@@ -78,144 +78,26 @@ def _is_ok_name(s: str) -> bool:
     w = s.strip().lower()
     if w in BLOCKLIST:
         return False
-    toks = [t.lower() for t in s.split()]
+    toks = [t.lower() for t in re.split(r"\s+", s.strip()) if t]
+    if not toks:
+        return False
     if all(t in BLOCKLIST for t in toks):
+        return False
+    # If any token is a stopword AND there are >1 tokens, it's likely junk
+    if len(toks) > 1 and any(t in BLOCKLIST for t in toks):
+        return False
+    # Too long for a human name
+    if len(toks) > 3:
         return False
     return True
 
 
 # Scrub obviously wrong assigned names like "(Joining)" -> "(Unknown)"
-BAD_NAME_RE = re.compile(
-    r"^(?:"
-    r"joining|welcome|now|tonight|breaking|live|thanks|thank you|thank|you|"
-    r"okay|ok|alright|right|back|so|look|listen|us|me"
-    r")$",
+BAD_NAME_TOKEN_RE = re.compile(
+    r"\b(?:joining|welcome|now|tonight|breaking|live|thanks|thank you|thank|you|"
+    r"okay|ok|alright|right|back|so|look|listen|us|me|host|founder|contributor|commentator|news|fox|turning|point|usa)\b",
     re.IGNORECASE,
 )
-
-ADDRESS_RE = re.compile(r"\b(?:Well|Look|Listen|So),\s+([A-Z][a-zA-Z]+)\b")
-
-def _collect_addressed_names_by_label(base_text: str) -> dict[str, list[str]]:
-    """
-    Parse the baseline transcript to find addressed names like 'Well, Liz,' and
-    attribute them to the speaker label of that line.
-    Returns: { label -> [name1, name2, ...] }
-    """
-    by_label: dict[str, list[str]] = {}
-    line_pat = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):\s*(.*)$")
-    for line in base_text.splitlines():
-        m = line_pat.match(line)
-        if not m:
-            continue
-        label = m.group(4)
-        text  = m.group(5)
-        for nm in ADDRESS_RE.findall(text):
-            if _is_ok_name(nm):
-                by_label.setdefault(label, []).append(nm)
-    return by_label
-
-
-def _force_other_label_name_when_addressed(base_text: str, out_text: str) -> str:
-    """
-    If exactly two speaker labels exist overall, and one label frequently addresses a single
-    name (e.g., 'Well, Liz,'), assign that name to the OTHER label consistently.
-
-    We only overwrite '(Unknown)' or scrubbed bad guesses for that other label.
-    """
-    # Find all labels present
-    label_pat = re.compile(r"^\[\d{2}:\d{2}:\d{2}\]\s+Speaker\s+(\S+):", re.M)
-    labels = list(dict.fromkeys(label_pat.findall(base_text)))  # in order of appearance
-    if len(labels) != 2:
-        return out_text
-
-    a, b = labels[0], labels[1]
-
-    addressed = _collect_addressed_names_by_label(base_text)
-    # Pick the dominant addressed name per label (if any)
-    def top_name(names: list[str]) -> str | None:
-        if not names:
-            return None
-        # frequency, then first appearance
-        counts = {}
-        order = []
-        for n in names:
-            if n not in counts:
-                counts[n] = 0
-                order.append(n)
-            counts[n] += 1
-        best = max(order, key=lambda n: (counts[n], -order.index(n)))
-        return best
-
-    name_addr_by_label = {lab: top_name(nms) for lab, nms in addressed.items() if nms}
-
-    # If one label repeatedly addresses a single name N, map N to the OTHER label
-    # Only act if we have a single confident addressed name
-    # Case 1: B addresses N -> N is A
-    # Case 2: A addresses N -> N is B
-    forced: dict[str, str] = {}
-    if b in name_addr_by_label and name_addr_by_label[b]:
-        forced[a] = name_addr_by_label[b]
-    if a in name_addr_by_label and name_addr_by_label[a]:
-        # If both sides address someone, bail unless they agree (avoid conflicts)
-        candidate = name_addr_by_label[a]
-        if a in forced or b in forced:
-            # Both sides set something; only keep if consistent
-            if forced.get(a) and forced[a] != candidate:
-                return out_text  # conflict -> do nothing
-        else:
-            force
-
-
-def _scrub_bad_assigned_names(text: str) -> str:
-    # Replace "(Joining)"-style names with "(Unknown)" but preserve everything else EXACTLY.
-    pattern = re.compile(r"^(\[\d{2}:\d{2}:\d{2}\]\s+Speaker\s+\S+\s*\()([^)]+)(\):)", re.M)
-
-    def repl(m: re.Match) -> str:
-        name = m.group(2).strip()
-        if BAD_NAME_RE.match(name):
-            return f"{m.group(1)}Unknown{m.group(3)}"
-        return m.group(0)
-
-    return pattern.sub(repl, text)
-
-
-def _postfix_single_unknown_with_single_candidate(out_text: str, candidates: list[str]) -> str:
-    """
-    If exactly one speaker label has '(Unknown)' and exactly one candidate name is unused,
-    replace that Unknown with the candidate. Keeps everything else identical.
-    """
-    line_pat = re.compile(
-        r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*\(([^)]+)\):",
-        re.M,
-    )
-    used_names = set()
-    labels_with_unknown = set()
-
-    for m in line_pat.finditer(out_text):
-        label = m.group(4)
-        name = m.group(5).strip()
-        if name.lower() == "unknown":
-            labels_with_unknown.add(label)
-        else:
-            used_names.add(name.lower())
-
-    if len(labels_with_unknown) != 1:
-        return out_text
-
-    # pick a candidate that isn't already used and not blocked
-    viable = [c for c in candidates if _is_ok_name(c) and c.lower() not in used_names]
-    if len(viable) != 1:
-        return out_text
-
-    label_to_fix = next(iter(labels_with_unknown))
-    chosen = viable[0]
-
-    # Replace only "(Unknown)" for this specific label
-    fix_pat = re.compile(
-        rf"^(\[\d{{2}}:\d{{2}}:\d{{2}}\]\s+Speaker\s+{re.escape(label_to_fix)}\s*\()Unknown(\):)",
-        re.M,
-    )
-    return fix_pat.sub(rf"\1{chosen}\2", out_text)
 
 _ADDR_PAT = re.compile(
     r"\b(?:Well|Yes|No|Right|Thanks|Thank you|Look|Listen|Okay|Ok|So|Alright),\s+"
@@ -226,97 +108,153 @@ _NAME_TAG_PAT = re.compile(
     r'^(\[\d{2}:\d{2}:\d{2}\]\s+Speaker\s+(\S+))(\s*\(([^)]+)\))?(:)(.*)$'
 )
 
+
 def _collect_addressed_names(text: str) -> List[str]:
     """Return a de-duped list of names that appear as being addressed."""
-    names = _ADDR_PAT.findall(text)
+    names = _ADDR_PAT.findall(text or "")
     # keep order, dedupe
     seen = set(); out = []
     for n in names:
-        if n not in seen:
+        if _is_ok_name(n) and n not in seen:
             seen.add(n); out.append(n)
     return out
 
-def _fill_missing_name_adaptively(base_text: str, out_text: str, candidates: List[str]) -> str:
-    """
-    If exactly two labels are present and only one has a confident name,
-    infer the other from addressed-name frequency and intro mentions.
-    Only fills when unambiguous; otherwise leaves output unchanged.
-    """
-    # label -> assigned name (from out_text), and all labels
-    label_to_name: dict[str, str] = {}
-    labels: set[str] = set()
-    lines = out_text.splitlines()
 
-    for ln in lines:
-        m = _NAME_TAG_PAT.match(ln)
-        if not m:
-            continue
-        label = m.group(2)
-        labels.add(label)
-        name = (m.group(4) or "").strip()
-        # treat explicit names other than "Unknown" as confident
-        if name and name.lower() != "unknown":
-            label_to_name[label] = name
+def _scrub_bad_assigned_names(text: str) -> str:
+    """
+    Replace names that contain obvious junk tokens (e.g., 'Joining', 'Welcome back') with (Unknown).
+    Preserves everything else EXACTLY.
+    """
+    if not text:
+        return text
+    pattern = re.compile(r"^(\[\d{2}:\d{2}:\d{2}\]\s+Speaker\s+\S+\s*\()([^)]+)(\):)", re.M)
 
-    # need exactly two labels
+    def repl(m: re.Match) -> str:
+        name = (m.group(2) or "").strip()
+        # Scrub if any bad token appears OR name is overly long / looks like a phrase
+        if not _is_ok_name(name) or BAD_NAME_TOKEN_RE.search(name):
+            return f"{m.group(1)}Unknown{m.group(3)}"
+        return m.group(0)
+
+    return pattern.sub(repl, text)
+
+
+def _postfix_single_unknown_with_single_candidate(out_text: str, candidates: List[str]) -> str:
+    """
+    If exactly one speaker label has '(Unknown)' and exactly one candidate name is unused,
+    replace that Unknown with the candidate. Keeps everything else identical.
+    """
+    if not out_text:
+        return out_text
+
+    line_pat = re.compile(
+        r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*\(([^)]+)\):",
+        re.M,
+    )
+    used_names = set()
+    labels_with_unknown = set()
+
+    for m in line_pat.finditer(out_text):
+        label = m.group(4)
+        name = (m.group(5) or "").strip()
+        if name.lower() == "unknown":
+            labels_with_unknown.add(label)
+        elif name:
+            used_names.add(name.lower())
+
+    if len(labels_with_unknown) != 1:
+        return out_text
+
+    viable = [c for c in (candidates or []) if _is_ok_name(c) and c.lower() not in used_names]
+    if len(viable) != 1:
+        return out_text
+
+    label_to_fix = next(iter(labels_with_unknown))
+    chosen = viable[0]
+
+    fix_pat = re.compile(
+        rf"^(\[\d{{2}}:\d{{2}}:\d{{2}}\]\s+Speaker\s+{re.escape(label_to_fix)}\s*\()Unknown(\):)",
+        re.M,
+    )
+    return fix_pat.sub(rf"\1{chosen}\2", out_text)
+
+
+def _force_other_label_name_when_addressed(base_text: str, out_text: str) -> str:
+    """
+    If exactly two speaker labels exist overall, and one label frequently addresses a single
+    name (e.g., 'Well, Liz,'), assign that name to the OTHER label consistently.
+
+    Only overwrites '(Unknown)' or missing names for that other label, and only when unambiguous.
+    """
+    if not base_text or not out_text:
+        return out_text
+
+    # Get labels in order of appearance (from base text, which always has labels)
+    label_pat = re.compile(r"^\[\d{2}:\d{2}:\d{2}\]\s+Speaker\s+(\S+):", re.M)
+    labels = list(dict.fromkeys(label_pat.findall(base_text)))
     if len(labels) != 2:
         return out_text
+    a, b = labels[0], labels[1]
 
-    # exactly one confidently named label?
-    unnamed = [lab for lab in labels if lab not in label_to_name]
-    if len(unnamed) != 1:
-        return out_text
-    named_label = next(iter(set(labels) - set(unnamed)))
-    other_label = unnamed[0]
+    # For each label (from OUT text, same line structure), collect addressed names
+    lines = out_text.splitlines()
+    addr_counts: Dict[str, Dict[str, int]] = {a: {}, b: {}}
 
-    # Build a frequency map of addressed names on lines spoken by the OTHER label.
-    # Use OUT lines (same line structure) to know which label is speaking.
-    freq: dict[str, int] = {}
     for ln in lines:
         m = _NAME_TAG_PAT.match(ln)
         if not m:
             continue
         label = m.group(2)
-        if label != other_label:
+        if label not in (a, b):
             continue
-        for name in _ADDR_PAT.findall(ln):
-            freq[name] = freq.get(name, 0) + 1
+        for nm in _ADDR_PAT.findall(ln):
+            if _is_ok_name(nm):
+                addr_counts[label][nm] = addr_counts[label].get(nm, 0) + 1
 
-    # restrict to candidates if you like
-    cand_set = set(candidates or [])
-    if cand_set:
-        freq = {n: c for n, c in freq.items() if n in cand_set}
+    # Decide a single most-addressed name per label (if any)
+    def top_name(freq: Dict[str, int]) -> str | None:
+        if not freq:
+            return None
+        # choose highest count; tie-break by earliest alphabetical to keep deterministic
+        best = sorted(freq.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+        return best
 
-    if not freq:
+    a_addr = top_name(addr_counts[a])
+    b_addr = top_name(addr_counts[b])
+
+    forced: Dict[str, str] = {}
+    # If B keeps addressing "Liz", force A = "Liz"
+    if b_addr:
+        forced[a] = b_addr
+    # If A keeps addressing "X", force B = "X"
+    if a_addr:
+        # If both set and conflict, abort (ambiguous)
+        if a in forced and forced[a] != a_addr:
+            return out_text
+        forced[b] = a_addr
+
+    if not forced:
         return out_text
 
-    # choose the most frequent addressed name, but avoid picking the already-named person
-    already_named = {label_to_name[named_label]}
-    best_name, best_count = None, 0
-    for n, c in freq.items():
-        if n in already_named:
-            continue
-        if c > best_count:
-            best_name, best_count = n, c
-
-    if not best_name:
-        return out_text
-
-    # Rewrite lines for the other_label that are missing or say (Unknown) -> add (best_name)
+    # Apply forced names, but only where missing or Unknown
     new_lines = []
     for ln in lines:
         m = _NAME_TAG_PAT.match(ln)
         if not m:
-            new_lines.append(ln); continue
+            new_lines.append(ln)
+            continue
         pre, label, paren, name, colon, rest = m.groups()
-        if label == other_label:
-            if not name or name.lower() == "unknown":
-                ln = f"{pre} ({best_name}){colon}{rest}"
+        want = forced.get(label)
+        if not want:
+            new_lines.append(ln)
+            continue
+
+        current = (name or "").strip()
+        if not current or current.lower() == "unknown" or BAD_NAME_TOKEN_RE.search(current) or not _is_ok_name(current):
+            ln = f"{pre} ({want}){colon}{rest}"
         new_lines.append(ln)
 
     return "\n".join(new_lines)
-
-
 
 
 def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, speaker_hint: str | None) -> str:
@@ -417,27 +355,24 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
 
     looks_like_host_intro = bool(re.search(
         r"\b(Joining us now|We('?| a)re joined by|Welcome back|Joining me|Now to|We have with us)\b",
-        first_talking_line,
+        first_talking_line or "",
         re.I,
     ))
 
     # Require >=2 tokens for intro names to avoid "Joining"
-    mentioned_in_intro = re.findall(rf"\b({INTRO_FULLNAME})\b", first_talking_line)
+    mentioned_in_intro = re.findall(rf"\b({INTRO_FULLNAME})\b", first_talking_line or "")
     mentioned_in_intro = [n for n in mentioned_in_intro if _is_ok_name(n)]
 
     # Names addressed like "Well, Liz," anywhere in the body
-    addressed_names = re.findall(r"\bWell,\s+([A-Z][a-zA-Z]+)\b", base_text)
-    addressed_names = [n for n in dict.fromkeys(addressed_names) if _is_ok_name(n)]  # dedupe + filter
-
+    addressed_names = _collect_addressed_names(base_text)
     # Capitalized tokens followed by comma (e.g., "Liz,")
-    comma_names = re.findall(r"\b([A-Z][a-zA-Z]+),", base_text)
-    comma_names = [n for n in dict.fromkeys(comma_names) if _is_ok_name(n)]
+    comma_names = [n for n in dict.fromkeys(re.findall(r"\b([A-Z][a-zA-Z]+),", base_text or "")) if _is_ok_name(n)]
 
     # Merge auto candidates + user hint
     auto_candidates = mentioned_in_intro + addressed_names + comma_names
     if speaker_hint:
         for tok in re.split(r"[;,/]| and | vs | with ", speaker_hint, flags=re.I):
-            tok = tok.strip()
+            tok = (tok or "").strip()
             if tok:
                 auto_candidates.append(tok)
 
@@ -469,6 +404,23 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
     # ---- Multi-speaker: GPT name guessing with STRICT preservation ----
     client = openai.OpenAI(api_key=openai_key)
 
+    # Build short samples per label (max 2)
+    label_samples = []
+    for lab in sorted(set(s['spk_label'] for s in segments)):
+        sample_lines = []
+        for seg in segments:
+            if seg['spk_label'] != lab:
+                continue
+            txt = (seg['text'] or "").strip()
+            if not txt:
+                continue
+            sample_lines.append(f"[{format_timestamp(seg['start'])}] {txt}")
+            if len(sample_lines) >= 2:
+                break
+        block = "\n".join(sample_lines) if sample_lines else "(no sample)"
+        label_samples.append(f"Speaker {lab} samples:\n{block}")
+    profile_block = "\n\n".join(label_samples)
+
     system_prompt = f"""
 You must preserve the input transcript EXACTLY:
 - Do NOT change or remove timestamps like [HH:MM:SS].
@@ -493,12 +445,7 @@ Additional disambiguation hints (follow strictly):
 
 Use these short samples to inform your guesses (do not copy these into the output):
 -----
-{ "\n\n".join([
-    f"Speaker {lab} samples:\n" + "\n".join(
-        [f"[{format_timestamp(seg['start'])}] {seg['text']}" for seg in segments if seg['spk_label'] == lab][:2]
-    ) or "(no sample)"
-    for lab in sorted(set(s['spk_label'] for s in segments))
-]) }
+{profile_block}
 -----
 """.strip()
 
@@ -516,12 +463,11 @@ Use these short samples to inform your guesses (do not copy these into the outpu
         # 1) Scrub obviously wrong names like "(Joining)"
         out = _scrub_bad_assigned_names(out)
 
-        # NEW: infer the other speaker's name from addressed cues like "Well, Liz,"
+        # 2) Force the *other* label name from addressed cues like "Well, Liz,"
         out = _force_other_label_name_when_addressed(base_text, out)
 
-        # Keep your existing fallback too (only triggers in the simple 1-unknown/1-candidate case)
+        # 3) Simple fallback: if exactly 1 Unknown & exactly 1 viable candidate, fill it
         out = _postfix_single_unknown_with_single_candidate(out, candidates)
-
 
         # Debug snapshots
         logger.debug("---- BASE (first 6 lines) ----\n%s", "\n".join(base_text.splitlines()[:6]))
@@ -536,32 +482,37 @@ Use these short samples to inform your guesses (do not copy these into the outpu
             logger.warning("Name guessing changed line count; returning baseline.")
             return base_text
 
-        ts_pat       = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):")
-        ts_pat_named = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*(\([^)]+\))?:")
+        ts_pat       = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):\s*$|^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):\s*.+")
+        ts_pat_named = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*(\([^)]+\))?:\s*$|^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*(\([^)]+\))?:\s*.+")
+        # Above regexes accept both empty and non-empty text after the colon, tolerating trailing spaces
 
         label_map_in2out: dict[str, str] = {}
         label_map_out2in: dict[str, str] = {}
 
-        for i, (a, b) in enumerate(zip(base_lines, out_lines), 1):
-            if not a.strip():   # blank line must remain blank
-                if b.strip() != "":
+        for i, (a_line, b_line) in enumerate(zip(base_lines, out_lines), 1):
+            if not a_line.strip():   # blank line must remain blank
+                if b_line.strip() != "":
                     logger.warning("Line %d: expected blank line; returning baseline.", i)
                     return base_text
                 continue
 
-            ma = ts_pat.match(a)
-            mb = ts_pat_named.match(b)
+            ma = ts_pat.match(a_line)
+            mb = ts_pat_named.match(b_line)
             if not ma or not mb:
-                logger.warning("Line %d: timestamp/speaker tag mismatch.\nBASE:%r\nOUT :%r", i, a, b)
+                logger.warning("Line %d: timestamp/speaker tag mismatch.\nBASE:%r\nOUT :%r", i, a_line, b_line)
                 return base_text
 
-            # timestamps must be identical
-            if ma.groups()[:3] != mb.groups()[:3]:
-                logger.warning("Line %d: timestamp changed.\nBASE:%r\nOUT :%r", i, a, b)
+            # Extract timestamps & labels (handle both alternations)
+            a_groups = [g for g in ma.groups() if g is not None]
+            b_groups = [g for g in mb.groups() if g is not None]
+
+            # First three are hh,mm,ss in both
+            if a_groups[0:3] != b_groups[0:3]:
+                logger.warning("Line %d: timestamp changed.\nBASE:%r\nOUT :%r", i, a_line, b_line)
                 return base_text
 
-            in_label  = ma.group(4)
-            out_label = mb.group(4)
+            in_label  = a_groups[3]
+            out_label = b_groups[3]
 
             # bijection check
             prev_out = label_map_in2out.get(in_label)
@@ -575,13 +526,6 @@ Use these short samples to inform your guesses (do not copy these into the outpu
 
             label_map_in2out[in_label] = out_label
             label_map_out2in[out_label] = in_label
-
-
-        # Build the candidate list you already compute:
-        candidates_list = [c.strip() for c in (candidate_block.split(",") if candidate_block else []) if c.strip()]
-
-        # Adaptively fill missing name for the other label (if unambiguous)
-        out = _fill_missing_name_adaptively(base_text, out, candidates_list)
 
         return out or base_text
 
@@ -720,5 +664,3 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
-
-
