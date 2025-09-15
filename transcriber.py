@@ -93,6 +93,79 @@ BAD_NAME_RE = re.compile(
     re.IGNORECASE,
 )
 
+ADDRESS_RE = re.compile(r"\b(?:Well|Look|Listen|So),\s+([A-Z][a-zA-Z]+)\b")
+
+def _collect_addressed_names_by_label(base_text: str) -> dict[str, list[str]]:
+    """
+    Parse the baseline transcript to find addressed names like 'Well, Liz,' and
+    attribute them to the speaker label of that line.
+    Returns: { label -> [name1, name2, ...] }
+    """
+    by_label: dict[str, list[str]] = {}
+    line_pat = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):\s*(.*)$")
+    for line in base_text.splitlines():
+        m = line_pat.match(line)
+        if not m:
+            continue
+        label = m.group(4)
+        text  = m.group(5)
+        for nm in ADDRESS_RE.findall(text):
+            if _is_ok_name(nm):
+                by_label.setdefault(label, []).append(nm)
+    return by_label
+
+
+def _force_other_label_name_when_addressed(base_text: str, out_text: str) -> str:
+    """
+    If exactly two speaker labels exist overall, and one label frequently addresses a single
+    name (e.g., 'Well, Liz,'), assign that name to the OTHER label consistently.
+
+    We only overwrite '(Unknown)' or scrubbed bad guesses for that other label.
+    """
+    # Find all labels present
+    label_pat = re.compile(r"^\[\d{2}:\d{2}:\d{2}\]\s+Speaker\s+(\S+):", re.M)
+    labels = list(dict.fromkeys(label_pat.findall(base_text)))  # in order of appearance
+    if len(labels) != 2:
+        return out_text
+
+    a, b = labels[0], labels[1]
+
+    addressed = _collect_addressed_names_by_label(base_text)
+    # Pick the dominant addressed name per label (if any)
+    def top_name(names: list[str]) -> str | None:
+        if not names:
+            return None
+        # frequency, then first appearance
+        counts = {}
+        order = []
+        for n in names:
+            if n not in counts:
+                counts[n] = 0
+                order.append(n)
+            counts[n] += 1
+        best = max(order, key=lambda n: (counts[n], -order.index(n)))
+        return best
+
+    name_addr_by_label = {lab: top_name(nms) for lab, nms in addressed.items() if nms}
+
+    # If one label repeatedly addresses a single name N, map N to the OTHER label
+    # Only act if we have a single confident addressed name
+    # Case 1: B addresses N -> N is A
+    # Case 2: A addresses N -> N is B
+    forced: dict[str, str] = {}
+    if b in name_addr_by_label and name_addr_by_label[b]:
+        forced[a] = name_addr_by_label[b]
+    if a in name_addr_by_label and name_addr_by_label[a]:
+        # If both sides address someone, bail unless they agree (avoid conflicts)
+        candidate = name_addr_by_label[a]
+        if a in forced or b in forced:
+            # Both sides set something; only keep if consistent
+            if forced.get(a) and forced[a] != candidate:
+                return out_text  # conflict -> do nothing
+        else:
+            force
+
+
 def _scrub_bad_assigned_names(text: str) -> str:
     # Replace "(Joining)"-style names with "(Unknown)" but preserve everything else EXACTLY.
     pattern = re.compile(r"^(\[\d{2}:\d{2}:\d{2}\]\s+Speaker\s+\S+\s*\()([^)]+)(\):)", re.M)
@@ -443,8 +516,12 @@ Use these short samples to inform your guesses (do not copy these into the outpu
         # 1) Scrub obviously wrong names like "(Joining)"
         out = _scrub_bad_assigned_names(out)
 
-        # 2) Optional: if there is exactly one Unknown and exactly one unused candidate, fill it
+        # NEW: infer the other speaker's name from addressed cues like "Well, Liz,"
+        out = _force_other_label_name_when_addressed(base_text, out)
+
+        # Keep your existing fallback too (only triggers in the simple 1-unknown/1-candidate case)
         out = _postfix_single_unknown_with_single_candidate(out, candidates)
+
 
         # Debug snapshots
         logger.debug("---- BASE (first 6 lines) ----\n%s", "\n".join(base_text.splitlines()[:6]))
@@ -643,4 +720,5 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
+
 
