@@ -27,10 +27,10 @@ def format_timestamp(ms: int | float) -> str:
     seconds = total_seconds % 60
     return f"{hours:02}:{minutes:02}:{seconds:02}"
 
-def _bucket_words_to_segments(words: list, bucket_ms: int = 8000) -> list[dict]:
+def _bucket_words_to_segments(words, bucket_ms: int = 8000) -> list[dict]:
     """
-    When we only have word timings, group them into ~8s segments.
-    words items must have .start, .end, .text attributes.
+    When only word timings exist, group them into ~8s segments with start/end/text.
+    'words' items have .start, .end, .text
     """
     words = words or []
     if not words:
@@ -45,37 +45,48 @@ def _bucket_words_to_segments(words: list, bucket_ms: int = 8000) -> list[dict]:
         segs.append({"start": cur_start, "end": words[-1].end, "text": " ".join(cur)})
     return segs
 
-def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, speaker_hint: str | None):
-    # --- AssemblyAI transcription (no 'paragraphs' in config) ---
+
+def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, speaker_hint: str | None) -> str:
+    """
+    Returns a timecoded transcript as plain text:
+        [HH:MM:SS] Speaker N: text
+
+    - Always includes timestamps & spacing
+    - Uses diarization from AssemblyAI
+    - If multiple speakers: asks GPT to append name guesses in parentheses
+      while STRICTLY preserving timestamps, speaker numbering, and line breaks
+    """
+    # ---- AssemblyAI transcription ----
     aai.settings.api_key = assemblyai_key
     config = aai.TranscriptionConfig(
         speaker_labels=True,   # diarization
         punctuate=True,
         disfluencies=True,
-        # enable_words: newer SDKs always return words; no need to set
+        # AssemblyAI SDK returns words by default in recent versions
     )
     transcript = aai.Transcriber().transcribe(audio_file_path, config)
 
-    # --- Build timecoded segments ---
-    segments: list[dict] = []   # {'start':ms,'end':ms,'text':str,'spk':int}
-    unique_speakers = set()
+    # ---- Build segments [{'start','end','text','spk'}] ----
+    segments: list[dict] = []
+    unique_speakers: set[int] = set()
 
-    # Preferred: utterances (speaker-labelled)
+    # Preferred path: utterances (have speaker id + timings)
     if getattr(transcript, "utterances", None):
         for u in transcript.utterances:
-            if not u.text:
+            txt = (u.text or "").strip()
+            if not txt:
                 continue
             unique_speakers.add(u.speaker)
             dur = u.end - u.start
-            if dur <= 30000:
-                segments.append({"start": u.start, "end": u.end, "text": u.text.strip(), "spk": u.speaker})
+            if dur <= 30000:  # <= 30s keep intact
+                segments.append({"start": u.start, "end": u.end, "text": txt, "spk": u.speaker})
             else:
-                # break long utterances into ~30s chunks based on word density within the text
-                words = u.text.split()
+                # break long utterances into ~30s chunks by density
+                words = txt.split()
                 if not words:
                     continue
-                wpm = max(1, len(words)) / max(1, dur)  # words per ms
-                step = max(1, int(wpm * 30000))         # words in 30s
+                w_per_ms = max(1, len(words)) / max(1, dur)
+                step = max(1, int(w_per_ms * 30000))  # words per ~30s
                 t0 = u.start
                 for i in range(0, len(words), step):
                     chunk = " ".join(words[i:i+step]).strip()
@@ -83,19 +94,15 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
                         segments.append({"start": t0, "end": min(u.end, t0 + 30000), "text": chunk, "spk": u.speaker})
                         t0 += 30000
 
-    # Fallback: paragraphs (fetched after transcription)
+    # Fallback: paragraphs (if SDK exposes them)
     if not segments:
         paras = []
         try:
-            # Newer SDKs expose a helper:
-            #   resp = transcript.get_paragraphs()
-            #   paras = resp.paragraphs
             resp = transcript.get_paragraphs()
             paras = getattr(resp, "paragraphs", []) or []
         except Exception:
             paras = []
         if paras:
-            # Paragraphs usually lack speaker IDs; treat as single speaker 0
             unique_speakers = {0}
             for p in paras:
                 txt = (p.text or "").strip()
@@ -103,7 +110,7 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
                     continue
                 segments.append({"start": p.start, "end": p.end, "text": txt, "spk": 0})
 
-    # Last resort: bucket word timings
+    # Last resort: bucket words (~8s)
     if not segments:
         words = getattr(transcript, "words", None) or []
         segs = _bucket_words_to_segments(words, bucket_ms=8000)
@@ -111,13 +118,13 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
         for s in segs:
             segments.append({"start": s["start"], "end": s["end"], "text": s["text"], "spk": 0})
 
-    # If everything failed, return a minimal string to avoid crashing
+    # If still nothing, return raw text to avoid crashing
     if not segments:
         logging.error("No segments produced from utterances, paragraphs, or words.")
         return (transcript.text or "").strip()
 
-    # --- Render baseline with timestamps (Speaker N) ---
-    lines = []
+    # ---- Render baseline (canonical) ----
+    lines: list[str] = []
     for seg in segments:
         text = (seg["text"] or "").strip()
         if not text:
@@ -128,22 +135,60 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
         lines.append("")  # blank line between segments
     base_text = "\n".join(lines).strip()
 
-    # If only one speaker, keep as-is (don’t run GPT so we never lose formatting)
+    # ---- If single speaker, DONE (no GPT so we never lose formatting) ----
     if len(unique_speakers) <= 1:
         return base_text
 
-    # --- Multi-speaker: GPT pass to append name guesses (preserve formatting strictly) ---
+    # ---- Build tiny "voice profiles" per speaker to help accurate naming ----
+    # We’ll feed GPT a compact context block with the first ~2 short clips per speaker (when available)
+    by_spk: dict[int, list[str]] = {}
+    for seg in segments:
+        by_spk.setdefault(seg["spk"], [])
+        if len(by_spk[seg["spk"]]) < 2 and len(seg["text"].split()) >= 6:
+            ts = format_timestamp(seg["start"])
+            by_spk[seg["spk"]].append(f"[{ts}] {seg['text']}")
+
+    profiles = []
+    for spk, samples in sorted(by_spk.items(), key=lambda kv: kv[0]):
+        # Join up to two short samples per speaker
+        sample_text = "\n".join(samples) if samples else "(no sample)"
+        profiles.append(f"Speaker {spk} samples:\n{sample_text}")
+    profile_block = "\n\n".join(profiles) if profiles else "(no samples)"
+
+    # Candidate hints (comma/semicolon separated in `speaker_hint`, if user passed known names)
+    candidates = []
+    if speaker_hint:
+        for tok in re.split(r"[;,/]| and | vs | with ", speaker_hint, flags=re.IGNORECASE):
+            tok = tok.strip()
+            if tok:
+                candidates.append(tok)
+    candidates = list(dict.fromkeys(candidates))  # dedupe, preserve order
+    candidate_block = ", ".join(candidates) if candidates else "None"
+
+    # ---- Multi-speaker: GPT name guessing with STRICT preservation ----
     client = openai.OpenAI(api_key=openai_key)
     system_prompt = f"""
-You are a transcription assistant. Preserve the input EXACTLY:
+You must preserve the input transcript EXACTLY:
 - Do NOT change or remove timestamps like [HH:MM:SS].
 - Do NOT merge, split, reorder, or wrap lines.
 - Do NOT remove blank lines.
 - Do NOT alter anything after the colon.
 
-Task: only append a guessed name in parentheses immediately after "Speaker X".
-If unsure, use (Unknown). Keep Speaker numbering unchanged.
-You may consider the hint: {speaker_hint or 'None'}.
+Task: ONLY append a guessed human-readable name in parentheses immediately after the 'Speaker X' tag on each line.
+
+Example:
+  Input:  [00:00:03] Speaker 1: Thank you for coming.
+  Output: [00:00:03] Speaker 1 (Jane Doe): Thank you for coming.
+
+Rules:
+- Keep the Speaker numbering identical to the input.
+- If unsure, use (Unknown).
+- Be consistent for the same Speaker across the whole file.
+- Use these candidates if relevant: {candidate_block}
+- Use these short samples to inform your guesses (do not copy these into the output):
+-----
+{profile_block}
+-----
 """.strip()
 
     try:
@@ -156,17 +201,38 @@ You may consider the hint: {speaker_hint or 'None'}.
             temperature=0.0
         )
         out = (resp.choices[0].message.content or "").strip()
-        # Safety fallback in case model deviates
-        if not out or "[" not in out or "Speaker " not in out:
+
+        # ---- Safety validation: timestamps and speaker tags must match line-for-line ----
+        base_lines = base_text.splitlines()
+        out_lines = out.splitlines()
+        if len(base_lines) != len(out_lines):
+            logging.warning("Name guessing changed line count; returning baseline.")
             return base_text
-        return out
+
+        ts_pat = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\d+):")
+        ts_pat_named = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\d+)\s*(\([^)]+\))?:")
+        for i, (a, b) in enumerate(zip(base_lines, out_lines)):
+            if not a.strip():   # allow blank line preservation
+                if b.strip() != "":
+                    logging.warning(f"Line {i+1}: expected blank line; returning baseline.")
+                    return base_text
+                continue
+            ma = ts_pat.match(a)
+            mb = ts_pat_named.match(b)
+            if not ma or not mb:
+                logging.warning(f"Line {i+1}: timestamp/speaker tag mismatch; returning baseline.")
+                return base_text
+            if ma.groups()[:3] != mb.groups()[:3] or ma.group(4) != mb.group(4):
+                logging.warning(f"Line {i+1}: timestamp or speaker number changed; returning baseline.")
+                return base_text
+
+        return out or base_text
+
     except Exception as e:
-        logging.warning(f"Name guessing step failed, returning baseline. Error: {e}")
+        logging.warning(f"Name guessing step failed; returning baseline. Error: {e}")
         return base_text
 
 
-
-    
 
 def _transcribe_large_file(audio_path: str, model: str, overlap_seconds: int, file_size: int) -> str:
     """Handle transcription of large audio files by splitting into chunks."""
@@ -298,6 +364,7 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
+
 
 
 
