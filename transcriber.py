@@ -1,3 +1,4 @@
+# transcriber.py
 import os
 import math
 import subprocess
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE_LIMIT = 24 * 1024 * 1024  # 24 MB
 DEFAULT_OVERLAP_SECONDS = 2
 
+# ---------- Small helpers ----------
 
 def _clean_hint_name(hint: str | None) -> str | None:
     """Pick a simple display name from speaker_hint like 'Donald Trump; Charles Payne'."""
@@ -57,7 +59,6 @@ def _bucket_words_to_segments(words, bucket_ms: int = 8000) -> list[dict]:
         segs.append({"start": cur_start, "end": words[-1].end, "text": " ".join(cur)})
     return segs
 
-
 # --- Name harvesting helpers (flexible, avoids generic tokens) ---
 
 # Basic proper-name token: Smith, O'Neil, Mary-Jane
@@ -91,7 +92,6 @@ def _is_ok_name(s: str) -> bool:
         return False
     return True
 
-
 # Scrub obviously wrong assigned names like "(Joining)" -> "(Unknown)"
 BAD_NAME_TOKEN_RE = re.compile(
     r"\b(?:joining|welcome|now|tonight|breaking|live|thanks|thank you|thank|you|"
@@ -108,17 +108,14 @@ _NAME_TAG_PAT = re.compile(
     r'^(\[\d{2}:\d{2}:\d{2}\]\s+Speaker\s+(\S+))(\s*\(([^)]+)\))?(:)(.*)$'
 )
 
-
 def _collect_addressed_names(text: str) -> List[str]:
     """Return a de-duped list of names that appear as being addressed."""
     names = _ADDR_PAT.findall(text or "")
-    # keep order, dedupe
     seen = set(); out = []
     for n in names:
         if _is_ok_name(n) and n not in seen:
             seen.add(n); out.append(n)
     return out
-
 
 def _scrub_bad_assigned_names(text: str) -> str:
     """
@@ -131,13 +128,11 @@ def _scrub_bad_assigned_names(text: str) -> str:
 
     def repl(m: re.Match) -> str:
         name = (m.group(2) or "").strip()
-        # Scrub if any bad token appears OR name is overly long / looks like a phrase
         if not _is_ok_name(name) or BAD_NAME_TOKEN_RE.search(name):
             return f"{m.group(1)}Unknown{m.group(3)}"
         return m.group(0)
 
     return pattern.sub(repl, text)
-
 
 def _postfix_single_unknown_with_single_candidate(out_text: str, candidates: List[str]) -> str:
     """
@@ -146,7 +141,6 @@ def _postfix_single_unknown_with_single_candidate(out_text: str, candidates: Lis
     """
     if not out_text:
         return out_text
-
     line_pat = re.compile(
         r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*\(([^)]+)\):",
         re.M,
@@ -178,7 +172,6 @@ def _postfix_single_unknown_with_single_candidate(out_text: str, candidates: Lis
     )
     return fix_pat.sub(rf"\1{chosen}\2", out_text)
 
-
 def _force_other_label_name_when_addressed(base_text: str, out_text: str) -> str:
     """
     If exactly two speaker labels exist overall, and one label frequently addresses a single
@@ -189,14 +182,14 @@ def _force_other_label_name_when_addressed(base_text: str, out_text: str) -> str
     if not base_text or not out_text:
         return out_text
 
-    # Get labels in order of appearance (from base text, which always has labels)
+    # Get labels in order of appearance (from base text)
     label_pat = re.compile(r"^\[\d{2}:\d{2}:\d{2}\]\s+Speaker\s+(\S+):", re.M)
     labels = list(dict.fromkeys(label_pat.findall(base_text)))
     if len(labels) != 2:
         return out_text
     a, b = labels[0], labels[1]
 
-    # For each label (from OUT text, same line structure), collect addressed names
+    # Count addressed names per label on OUT text
     lines = out_text.splitlines()
     addr_counts: Dict[str, Dict[str, int]] = {a: {}, b: {}}
 
@@ -211,61 +204,54 @@ def _force_other_label_name_when_addressed(base_text: str, out_text: str) -> str
             if _is_ok_name(nm):
                 addr_counts[label][nm] = addr_counts[label].get(nm, 0) + 1
 
-    # Decide a single most-addressed name per label (if any)
     def top_name(freq: Dict[str, int]) -> str | None:
         if not freq:
             return None
-        # choose highest count; tie-break by earliest alphabetical to keep deterministic
-        best = sorted(freq.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
-        return best
+        return sorted(freq.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
 
     a_addr = top_name(addr_counts[a])
     b_addr = top_name(addr_counts[b])
 
     forced: Dict[str, str] = {}
-    # If B keeps addressing "Liz", force A = "Liz"
     if b_addr:
         forced[a] = b_addr
-    # If A keeps addressing "X", force B = "X"
     if a_addr:
-        # If both set and conflict, abort (ambiguous)
         if a in forced and forced[a] != a_addr:
-            return out_text
+            return out_text  # ambiguous
         forced[b] = a_addr
 
     if not forced:
         return out_text
 
-    # Apply forced names, but only where missing or Unknown
+    # Apply forced names where missing/Unknown/bad
     new_lines = []
     for ln in lines:
         m = _NAME_TAG_PAT.match(ln)
         if not m:
-            new_lines.append(ln)
-            continue
+            new_lines.append(ln); continue
         pre, label, paren, name, colon, rest = m.groups()
         want = forced.get(label)
         if not want:
-            new_lines.append(ln)
-            continue
+            new_lines.append(ln); continue
 
         current = (name or "").strip()
-        if not current or current.lower() == "unknown" or BAD_NAME_TOKEN_RE.search(current) or not _is_ok_name(current):
+        if (not current) or (current.lower() == "unknown") or BAD_NAME_TOKEN_RE.search(current) or not _is_ok_name(current):
             ln = f"{pre} ({want}){colon}{rest}"
         new_lines.append(ln)
 
     return "\n".join(new_lines)
 
+# ---------- Main ----------
 
 def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, speaker_hint: str | None) -> str:
     """
     Returns a timecoded transcript as plain text:
-        [HH:MM:SS] Speaker N: text
+        [HH:MM:SS] Speaker X: text
 
     - Always includes timestamps & spacing
     - Uses diarization from AssemblyAI
-    - If multiple speakers: asks GPT to append name guesses in parentheses
-      while STRICTLY preserving timestamps, speaker numbering, and line breaks
+    - Appends name guesses in parentheses while STRICTLY preserving timestamps,
+      speaker labels, and line breaks.
     """
     # ---- AssemblyAI transcription ----
     aai.settings.api_key = assemblyai_key
@@ -350,6 +336,22 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
         lines.append("")  # blank line between segments
     base_text = "\n".join(lines).strip()
 
+    # ---- Single-speaker fast path (deterministic, no LLM) ----
+    if len(set(s["spk_label"] for s in segments)) == 1:
+        label = segments[0]["spk_label"]
+        display_name = _clean_hint_name(speaker_hint) or "Unknown"
+        pat = re.compile(rf"^(\[\d{{2}}:\d{{2}}:\d{{2}}\]\s+Speaker\s+{re.escape(label)})(:)", re.M)
+        out_lines = []
+        for line in base_text.splitlines():
+            if not line.strip():
+                out_lines.append(line); continue
+            m = pat.match(line)
+            if m:
+                out_lines.append(f"{m.group(1)} ({display_name}){m.group(2)}{line[m.end():]}")
+            else:
+                out_lines.append(line)
+        return _scrub_bad_assigned_names("\n".join(out_lines))
+
     # ---- Harvest lightweight cues for names/roles ----
     first_talking_line = next((ln for ln in base_text.splitlines() if ln.strip()), "")
 
@@ -363,9 +365,8 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
     mentioned_in_intro = re.findall(rf"\b({INTRO_FULLNAME})\b", first_talking_line or "")
     mentioned_in_intro = [n for n in mentioned_in_intro if _is_ok_name(n)]
 
-    # Names addressed like "Well, Liz," anywhere in the body
+    # Names addressed like "Well, Liz," and tokens like "Liz," elsewhere
     addressed_names = _collect_addressed_names(base_text)
-    # Capitalized tokens followed by comma (e.g., "Liz,")
     comma_names = [n for n in dict.fromkeys(re.findall(r"\b([A-Z][a-zA-Z]+),", base_text or "")) if _is_ok_name(n)]
 
     # Merge auto candidates + user hint
@@ -376,7 +377,6 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
             if tok:
                 auto_candidates.append(tok)
 
-    # dedupe & trim
     candidates = list(dict.fromkeys(auto_candidates))[:8]
     candidate_block = ", ".join(candidates) if candidates else "None"
 
@@ -460,13 +460,9 @@ Use these short samples to inform your guesses (do not copy these into the outpu
         )
         out = (resp.choices[0].message.content or "").strip()
 
-        # 1) Scrub obviously wrong names like "(Joining)"
+        # Post-fixes
         out = _scrub_bad_assigned_names(out)
-
-        # 2) Force the *other* label name from addressed cues like "Well, Liz,"
         out = _force_other_label_name_when_addressed(base_text, out)
-
-        # 3) Simple fallback: if exactly 1 Unknown & exactly 1 viable candidate, fill it
         out = _postfix_single_unknown_with_single_candidate(out, candidates)
 
         # Debug snapshots
@@ -482,37 +478,32 @@ Use these short samples to inform your guesses (do not copy these into the outpu
             logger.warning("Name guessing changed line count; returning baseline.")
             return base_text
 
-        ts_pat       = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):\s*$|^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):\s*.+")
-        ts_pat_named = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*(\([^)]+\))?:\s*$|^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*(\([^)]+\))?:\s*.+")
-        # Above regexes accept both empty and non-empty text after the colon, tolerating trailing spaces
+        ts_pat       = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):")
+        ts_pat_named = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*(\([^)]+\))?:")
 
         label_map_in2out: dict[str, str] = {}
         label_map_out2in: dict[str, str] = {}
 
-        for i, (a_line, b_line) in enumerate(zip(base_lines, out_lines), 1):
-            if not a_line.strip():   # blank line must remain blank
-                if b_line.strip() != "":
+        for i, (a, b) in enumerate(zip(base_lines, out_lines), 1):
+            if not a.strip():   # blank line must remain blank
+                if b.strip() != "":
                     logger.warning("Line %d: expected blank line; returning baseline.", i)
                     return base_text
                 continue
 
-            ma = ts_pat.match(a_line)
-            mb = ts_pat_named.match(b_line)
+            ma = ts_pat.match(a)
+            mb = ts_pat_named.match(b)
             if not ma or not mb:
-                logger.warning("Line %d: timestamp/speaker tag mismatch.\nBASE:%r\nOUT :%r", i, a_line, b_line)
+                logger.warning("Line %d: timestamp/speaker tag mismatch.\nBASE:%r\nOUT :%r", i, a, b)
                 return base_text
 
-            # Extract timestamps & labels (handle both alternations)
-            a_groups = [g for g in ma.groups() if g is not None]
-            b_groups = [g for g in mb.groups() if g is not None]
-
-            # First three are hh,mm,ss in both
-            if a_groups[0:3] != b_groups[0:3]:
-                logger.warning("Line %d: timestamp changed.\nBASE:%r\nOUT :%r", i, a_line, b_line)
+            # timestamps must be identical
+            if ma.groups()[:3] != mb.groups()[:3]:
+                logger.warning("Line %d: timestamp changed.\nBASE:%r\nOUT :%r", i, a, b)
                 return base_text
 
-            in_label  = a_groups[3]
-            out_label = b_groups[3]
+            in_label  = ma.group(4)
+            out_label = mb.group(4)
 
             # bijection check
             prev_out = label_map_in2out.get(in_label)
@@ -532,7 +523,6 @@ Use these short samples to inform your guesses (do not copy these into the outpu
     except Exception as e:
         logger.warning("Name guessing step failed; returning baseline. Error: %s", e)
         return base_text
-
 
 # ------------- Large-file chunking utilities (unchanged) ----------------
 
@@ -597,7 +587,6 @@ def _transcribe_large_file(audio_path: str, model: str, overlap_seconds: int, fi
     logger.info(f"Transcription completed with {len(transcripts)}/{num_chunks} successful chunks")
     return " ".join(transcripts)
 
-
 def _create_chunk_file(audio_path: str, start_time: float, end_time: float, index: int) -> Path:
     """Create a temporary chunk file using ffmpeg."""
     audio_path = Path(audio_path)
@@ -617,7 +606,6 @@ def _create_chunk_file(audio_path: str, start_time: float, end_time: float, inde
         raise RuntimeError(f"Failed to create audio chunk: {str(e)}")
 
     return chunk_path
-
 
 def _cleanup_temp_files(file_paths: List[Path]):
     """Clean up temporary files with retry mechanism."""
