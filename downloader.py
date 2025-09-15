@@ -186,18 +186,17 @@ def _build_attempts(
     url: str,
     out_tmpl: str,
     enrich: List[str],
-    prefer_format: str = "251/140/bestaudio/best",
-    geo_countries: Optional[List[str]] = None,
+    prefer_format: str,
+    geo_countries: List[str],
+    supports_cookies: bool,
 ) -> List[Tuple[str, List[str]]]:
     """
-    Builds a retry ladder that rotates:
-      - geo country (PR, US, …)
-      - player_client (android, ios, mweb, tv_embedded, web forced)
+    Build a retry ladder that rotates:
+      - geo country (default: US)
+      - player_client (web-first when cookies are present)
       - direct '-x' audio extraction
     """
-    geo_list = (geo_countries or
-                getattr(Config, "YTDLP_GEO_COUNTRIES", None) or
-                ["PR", "US"])
+    geo_list = geo_countries or ["US"]
 
     attempts: List[Tuple[str, List[str]]] = []
 
@@ -213,18 +212,27 @@ def _build_attempts(
             "--geo-bypass", "--geo-bypass-country", country,
         ] + enrich
 
-        # format ladder (container, no extract yet)
+        # Prefer grabbing a container stream first, then extract/convert if needed
         common_fmt = base_common + ["-f", prefer_format]
 
-        attempts += [
-            (f"{country}_android",  common_fmt + ["--extractor-args", "youtube:player_client=android"]),
-            (f"{country}_ios",      common_fmt + ["--extractor-args", "youtube:player_client=ios"]),
-            (f"{country}_mweb",     common_fmt + ["--extractor-args", "youtube:player_client=mweb"]),
-            (f"{country}_tv_embed", common_fmt + ["--extractor-args", "youtube:player_client=tv_embedded"]),
-            (f"{country}_web_forced", common_fmt + ["--extractor-args", "youtube:webpage_download_web=1"]),
-            # fallback: extract to final audio directly
-            (f"{country}_extract", base_common + ["-x", "--audio-format", Config.AUDIO_FORMAT]),
-        ]
+        if supports_cookies:
+            # android/ios clients do not support cookies → web clients only
+            attempts += [
+                (f"{country}_mweb",       common_fmt + ["--extractor-args", "youtube:player_client=mweb"]),
+                (f"{country}_tv_embed",   common_fmt + ["--extractor-args", "youtube:player_client=tv_embedded"]),
+                (f"{country}_web_forced", common_fmt + ["--extractor-args", "youtube:webpage_download_web=1"]),
+                (f"{country}_extract",    base_common + ["-x", "--audio-format", Config.AUDIO_FORMAT]),
+            ]
+        else:
+            # No cookies: rotate through all clients
+            attempts += [
+                (f"{country}_android",    common_fmt + ["--extractor-args", "youtube:player_client=android"]),
+                (f"{country}_ios",        common_fmt + ["--extractor-args", "youtube:player_client=ios"]),
+                (f"{country}_mweb",       common_fmt + ["--extractor-args", "youtube:player_client=mweb"]),
+                (f"{country}_tv_embed",   common_fmt + ["--extractor-args", "youtube:player_client=tv_embedded"]),
+                (f"{country}_web_forced", common_fmt + ["--extractor-args", "youtube:webpage_download_web=1"]),
+                (f"{country}_extract",    base_common + ["-x", "--audio-format", Config.AUDIO_FORMAT]),
+            ]
 
     return attempts
 
@@ -257,17 +265,19 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
 
     # --- Cookies & UA setup ---
     temp_paths_to_cleanup: List[str] = []
-    # materialize a cookies file if available
-    temp_cookies_file: Optional[str] = _materialize_cookies(temp_paths_to_cleanup)
+    temp_cookies_file: Optional[str] = _materialize_cookies(temp_paths_to_cleanup)  # must exist above
 
     cookies_from_browser = os.getenv(
         "YTDLP_COOKIES_FROM_BROWSER",
         getattr(Config, "YTDLP_COOKIES_FROM_BROWSER", "") if hasattr(Config, "YTDLP_COOKIES_FROM_BROWSER") else ""
     ).strip()
+
     user_agent = os.getenv("YTDLP_USER_AGENT", getattr(Config, "YTDLP_USER_AGENT", "")).strip()
 
-    # optional proxy
-    proxy_url = os.getenv("YTDLP_PROXY_URL", getattr(Config, "YTDLP_PROXY_URL", "") if hasattr(Config, "YTDLP_PROXY_URL") else "").strip()
+    proxy_url = os.getenv(
+        "YTDLP_PROXY_URL",
+        getattr(Config, "YTDLP_PROXY_URL", "") if hasattr(Config, "YTDLP_PROXY_URL") else ""
+    ).strip()
 
     # --- Metadata (no download) ---
     ydl_opts: Dict[str, Any] = {
@@ -313,8 +323,10 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     except Exception as e:
         log.error("Unexpected error during metadata extraction for %s: %s", url, e, exc_info=True)
         for p in temp_paths_to_cleanup:
-            try: os.remove(p)
-            except Exception: pass
+            try:
+                os.remove(p)
+            except Exception:
+                pass
         return None
 
     # --- Enrichment flags (headers/cookies/proxy) for CLI ---
@@ -332,15 +344,24 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if proxy_url:
         enrich += ["--proxy", proxy_url]
 
-    # --- Build attempts ladder ---
-    geo_countries = getattr(Config, "YTDLP_GEO_COUNTRIES", None) or ["PR", "US"]
-    attempts = _build_attempts(
+    # --- Build attempts ladder (exactly once) ---
+    geo_countries_cfg = getattr(Config, "YTDLP_GEO_COUNTRIES", None)
+    if geo_countries_cfg:
+        geo_countries = [c.strip() for c in str(geo_countries_cfg).split(",") if c.strip()]
+    else:
+        geo_countries_env = os.getenv("YTDLP_GEO_COUNTRIES", "US")
+        geo_countries = [c.strip() for c in geo_countries_env.split(",") if c.strip()]
+
+    supports_cookies = bool(temp_cookies_file or cookies_from_browser)
+
+    attempts = _build_attempts(  # must exist above
         yt_path=YT_DLP_PATH,
         url=url,
         out_tmpl=output_path_template,
         enrich=enrich,
         prefer_format="251/140/bestaudio/best",
         geo_countries=geo_countries,
+        supports_cookies=supports_cookies,
     )
 
     # --- Run attempts ---
@@ -353,7 +374,6 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                 if result.stdout:
                     log.info("yt-dlp stdout:\n%s", result.stdout)
                 if result.stderr:
-                    # note: yt-dlp often prints info to stderr
                     log.debug("yt-dlp stderr:\n%s", result.stderr)
 
                 # Success case 1: final mp3 exists
@@ -372,12 +392,11 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                         if cand.suffix.lower() == ".mp3":
                             log.info("Success (%s) → %s", label, cand)
                             return (str(cand), {**metadata, "download_attempt": label})
-                        out = _ensure_mp3(cand, final_audio_path)
+                        out = _ensure_mp3(cand, final_audio_path)  # must exist above
                         if out:
                             log.info("Success (%s) + convert → %s", label, out)
                             return (out, {**metadata, "download_attempt": label})
 
-                # If we get here, yt-dlp ran but we didn’t find a usable file
                 log.error("Attempt '%s' completed but no usable audio file was produced.", label)
                 last_err = RuntimeError("yt-dlp completed without producing expected output.")
 
