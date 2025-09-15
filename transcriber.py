@@ -21,6 +21,7 @@ CHUNK_SIZE_LIMIT = 24 * 1024 * 1024  # 24 MB
 DEFAULT_OVERLAP_SECONDS = 2
 
 def format_timestamp(ms: int | float) -> str:
+    """Return HH:MM:SS with zero-padded hours."""
     total_seconds = int(round(ms / 1000.0))
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
@@ -29,8 +30,9 @@ def format_timestamp(ms: int | float) -> str:
 
 def _bucket_words_to_segments(words: list, bucket_ms: int = 8000) -> list[dict]:
     """
-    When we only have word timings, group them into ~8s segments.
-    words items must have .start, .end, .text attributes.
+    Group word timings into ~8s chunks when utterances/paragraphs
+    aren’t available. words: items with .start/.end/.text.
+    Returns [{'start':ms,'end':ms,'text':str}...]
     """
     words = words or []
     if not words:
@@ -46,36 +48,45 @@ def _bucket_words_to_segments(words: list, bucket_ms: int = 8000) -> list[dict]:
     return segs
 
 def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, speaker_hint: str | None):
-    # --- AssemblyAI transcription (no 'paragraphs' in config) ---
+    """
+    Always returns timecoded text in the canonical form:
+       [HH:MM:SS] Speaker N: text
+
+    - Single speaker: returns timecoded text directly (no GPT involved).
+    - Multiple speakers: runs a strict GPT pass that ONLY appends a guessed
+      name in parentheses after "Speaker N" without changing timestamps or spacing.
+    """
+    # --- AssemblyAI transcription ---
     aai.settings.api_key = assemblyai_key
     config = aai.TranscriptionConfig(
-        speaker_labels=True,   # diarization
+        speaker_labels=True,   # diarization on
         punctuate=True,
         disfluencies=True,
-        # enable_words: newer SDKs always return words; no need to set
+        # (paragraphs is NOT a valid config arg; see get_paragraphs() below)
+        # enable_words: not required; modern SDKs include words
     )
     transcript = aai.Transcriber().transcribe(audio_file_path, config)
 
-    # --- Build timecoded segments ---
-    segments: list[dict] = []   # {'start':ms,'end':ms,'text':str,'spk':int}
+    # --- Build canonical segments [{'start','end','text','spk'}] ---
+    segments: list[dict] = []
     unique_speakers = set()
 
-    # Preferred: utterances (speaker-labelled)
+    # Preferred: utterances (have speaker IDs and timings)
     if getattr(transcript, "utterances", None):
         for u in transcript.utterances:
             if not u.text:
                 continue
             unique_speakers.add(u.speaker)
             dur = u.end - u.start
-            if dur <= 30000:
+            if dur <= 30000:  # <= 30s keep intact
                 segments.append({"start": u.start, "end": u.end, "text": u.text.strip(), "spk": u.speaker})
             else:
-                # break long utterances into ~30s chunks based on word density within the text
+                # break long utterances into ~30s chunks by word density
                 words = u.text.split()
                 if not words:
                     continue
-                wpm = max(1, len(words)) / max(1, dur)  # words per ms
-                step = max(1, int(wpm * 30000))         # words in 30s
+                words_per_ms = max(1, len(words)) / max(1, dur)
+                step = max(1, int(words_per_ms * 30000))  # words per 30s
                 t0 = u.start
                 for i in range(0, len(words), step):
                     chunk = " ".join(words[i:i+step]).strip()
@@ -83,27 +94,22 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
                         segments.append({"start": t0, "end": min(u.end, t0 + 30000), "text": chunk, "spk": u.speaker})
                         t0 += 30000
 
-    # Fallback: paragraphs (fetched after transcription)
+    # Fallback: paragraphs fetched AFTER transcription (no speaker IDs)
     if not segments:
         paras = []
         try:
-            # Newer SDKs expose a helper:
-            #   resp = transcript.get_paragraphs()
-            #   paras = resp.paragraphs
-            resp = transcript.get_paragraphs()
+            resp = transcript.get_paragraphs()  # SDK helper; returns object with .paragraphs
             paras = getattr(resp, "paragraphs", []) or []
         except Exception:
             paras = []
         if paras:
-            # Paragraphs usually lack speaker IDs; treat as single speaker 0
             unique_speakers = {0}
             for p in paras:
                 txt = (p.text or "").strip()
-                if not txt:
-                    continue
-                segments.append({"start": p.start, "end": p.end, "text": txt, "spk": 0})
+                if txt:
+                    segments.append({"start": p.start, "end": p.end, "text": txt, "spk": 0})
 
-    # Last resort: bucket word timings
+    # Last resort: bucket word timings into ~8s segments
     if not segments:
         words = getattr(transcript, "words", None) or []
         segs = _bucket_words_to_segments(words, bucket_ms=8000)
@@ -111,39 +117,39 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
         for s in segs:
             segments.append({"start": s["start"], "end": s["end"], "text": s["text"], "spk": 0})
 
-    # If everything failed, return a minimal string to avoid crashing
+    # If absolutely nothing, return raw transcript text to avoid crashing
     if not segments:
-        logging.error("No segments produced from utterances, paragraphs, or words.")
+        logging.error("No segments produced (utterances/paragraphs/words were all empty).")
         return (transcript.text or "").strip()
 
     # --- Render baseline with timestamps (Speaker N) ---
-    lines = []
+    lines: list[str] = []
     for seg in segments:
-        text = (seg["text"] or "").strip()
-        if not text:
+        txt = (seg["text"] or "").strip()
+        if not txt:
             continue
         ts = format_timestamp(seg["start"])
         spk = seg["spk"]
-        lines.append(f"[{ts}] Speaker {spk}: {text}")
+        lines.append(f"[{ts}] Speaker {spk}: {txt}")
         lines.append("")  # blank line between segments
     base_text = "\n".join(lines).strip()
 
-    # If only one speaker, keep as-is (don’t run GPT so we never lose formatting)
+    # Single speaker? Do NOT call GPT → preserves timestamps/spacing
     if len(unique_speakers) <= 1:
         return base_text
 
-    # --- Multi-speaker: GPT pass to append name guesses (preserve formatting strictly) ---
+    # --- Multi-speaker: GPT pass that ONLY appends a name in parentheses ---
     client = openai.OpenAI(api_key=openai_key)
     system_prompt = f"""
-You are a transcription assistant. Preserve the input EXACTLY:
+You must preserve the INPUT EXACTLY:
 - Do NOT change or remove timestamps like [HH:MM:SS].
 - Do NOT merge, split, reorder, or wrap lines.
 - Do NOT remove blank lines.
-- Do NOT alter anything after the colon.
+- Do NOT change anything after the colon on any line.
 
-Task: only append a guessed name in parentheses immediately after "Speaker X".
+Task: ONLY append a guessed name in parentheses immediately after "Speaker X".
 If unsure, use (Unknown). Keep Speaker numbering unchanged.
-You may consider the hint: {speaker_hint or 'None'}.
+Hint: {speaker_hint or 'None'}.
 """.strip()
 
     try:
@@ -156,16 +162,13 @@ You may consider the hint: {speaker_hint or 'None'}.
             temperature=0.0
         )
         out = (resp.choices[0].message.content or "").strip()
-        # Safety fallback in case model deviates
+        # Safety fallback if model deviates
         if not out or "[" not in out or "Speaker " not in out:
             return base_text
         return out
     except Exception as e:
-        logging.warning(f"Name guessing step failed, returning baseline. Error: {e}")
+        logging.warning(f"Name-guessing step failed. Returning baseline. Error: {e}")
         return base_text
-
-
-
     
 
 def _transcribe_large_file(audio_path: str, model: str, overlap_seconds: int, file_size: int) -> str:
@@ -298,6 +301,7 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
+
 
 
 
