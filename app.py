@@ -9,6 +9,15 @@ from html2docx import html2docx
 
 import os
 
+
+
+level = os.getenv("LOGLEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, level, logging.INFO),
+    format="%(levelname)s:%(name)s:%(message)s"
+)
+
+
 st.caption("Optional: provide YouTube cookies for sign-in/consent/region-locked videos.")
 cookies_file = st.file_uploader("Upload cookies.txt", type=["txt"])
 if cookies_file is not None:
