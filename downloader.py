@@ -24,17 +24,24 @@ from config import Config
 
 log = logging.getLogger(__name__)
 
-def _log_egress_ip(proxy_url: Optional[str]) -> None:
+def _egress_info(proxy_url: Optional[str]) -> Dict[str, str]:
+    """Return {'ip': 'x.x.x.x', 'country': 'US', 'source': 'direct|proxy'}; best-effort."""
+    info = {"ip": "unknown", "country": "??", "source": "proxy" if proxy_url else "direct"}
     try:
         handlers = []
         if proxy_url:
             handlers.append(urllib.request.ProxyHandler({'http': proxy_url, 'https': proxy_url}))
         opener = urllib.request.build_opener(*handlers)
-        with opener.open("https://api.ipify.org", timeout=5) as r:
-            ip = r.read().decode("utf-8", "ignore")
-            log.info("Egress IP (via proxy=%s): %s", bool(proxy_url), ip)
+        with opener.open("https://ipapi.co/json", timeout=6) as r:
+            data = r.read().decode("utf-8", "ignore")
+        import json
+        j = json.loads(data)
+        info["ip"] = j.get("ip") or info["ip"]
+        info["country"] = (j.get("country") or "??").upper()
     except Exception as e:
-        log.debug("Egress IP check failed: %s", e)
+        log.debug("Egress info check failed: %s", e)
+    log.info("Egress: ip=%s country=%s via=%s", info["ip"], info["country"], info["source"])
+    return info
 
 # --- Dependency Checks ---
 try:
@@ -295,7 +302,17 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     ).strip()
 
     # Log egress IP (helps diagnose region blocks)
-    _log_egress_ip(proxy_url or None)
+    eg = _egress_info(proxy_url or None)
+
+    allowed = {"PR", "US"}
+    if not proxy_url and eg["country"] not in allowed:
+        log.error(
+            "Blocked region: egress country=%s. This video is only available in %s. "
+            "Set YTDLP_PROXY_URL to a PR/US proxy or run the app from PR/US.",
+            eg["country"], ", ".join(sorted(allowed))
+        )
+        # You can return None to stop early, or continue to attempts if you prefer
+        return None
 
     # --- Metadata (no download) ---
     ydl_opts: Dict[str, Any] = {
@@ -451,3 +468,4 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
