@@ -295,8 +295,6 @@ Use these short samples to inform your guesses (do not copy these into the outpu
 {profile_block}
 -----
 """.strip()
-    logging.debug("GPT candidate_block=%r", candidate_block)
-    logging.debug("GPT role_hint_block=%r", role_hint_block)
     try:
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -308,55 +306,62 @@ Use these short samples to inform your guesses (do not copy these into the outpu
         )
         out = (resp.choices[0].message.content or "").strip()
 
-        # ---- Safety validation with allowed relabeling (bijection mapping) ----
-        base_lines = base_text.splitlines()
-        out_lines = out.splitlines()
-        if len(base_lines) != len(out_lines):
-            logging.warning("Name guessing changed line count; returning baseline.")
+
+
+    logging.debug("---- BASE (first 6 lines) ----\n%s", "\n".join(base_text.splitlines()[:6]))
+    logging.debug("---- OUT  (first 6 lines) ----\n%s", "\n".join(out.splitlines()[:6]))
+    logging.debug("Candidates: %s", candidate_block)
+    logging.debug("Role hints:\n%s", role_hint_block)
+
+    
+    # ---- Safety validation with allowed relabeling (bijection mapping) ----
+    base_lines = base_text.splitlines()
+    out_lines  = out.splitlines()
+    if len(base_lines) != len(out_lines):
+        logging.warning("Name guessing changed line count; returning baseline.")
+        return base_text
+
+    ts_pat       = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):")
+    ts_pat_named = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*(\([^)]+\))?:")
+
+    label_map_in2out: dict[str, str] = {}
+    label_map_out2in: dict[str, str] = {}
+
+    for i, (a, b) in enumerate(zip(base_lines, out_lines), 1):
+        if not a.strip():   # blank line must remain blank
+            if b.strip() != "":
+                logging.warning("Line %d: expected blank line; returning baseline.", i)
+                return base_text
+            continue
+
+        ma = ts_pat.match(a)
+        mb = ts_pat_named.match(b)
+        if not ma or not mb:
+            logging.warning("Line %d: timestamp/speaker tag mismatch.\nBASE:%r\nOUT :%r", i, a, b)
             return base_text
 
-        ts_pat = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+):\s*$")
-        ts_pat_named = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s+Speaker\s+(\S+)\s*(\([^)]+\))?\s*:\s*$")
+        # timestamps must be identical
+        if ma.groups()[:3] != mb.groups()[:3]:
+            logging.warning("Line %d: timestamp changed.\nBASE:%r\nOUT :%r", i, a, b)
+            return base_text
 
+        in_label  = ma.group(4)
+        out_label = mb.group(4)
 
-        label_map_in2out: dict[str, str] = {}
-        label_map_out2in: dict[str, str] = {}
+        # bijection check
+        prev_out = label_map_in2out.get(in_label)
+        prev_in  = label_map_out2in.get(out_label)
+        if prev_out and prev_out != out_label:
+            logging.warning("Line %d: inconsistent relabeling %r->%r (saw %r).", i, in_label, out_label, prev_out)
+            return base_text
+        if prev_in and prev_in != in_label:
+            logging.warning("Line %d: non-bijective relabeling %r<- %r (saw %r).", i, out_label, in_label, prev_in)
+            return base_text
 
-        for i, (a, b) in enumerate(zip(base_lines, out_lines)):
-            if not a.strip():   # blank line must remain blank
-                if b.strip() != "":
-                    logging.warning(f"Line {i+1}: expected blank line; returning baseline.")
-                    return base_text
-                continue
+        label_map_in2out[in_label] = out_label
+        label_map_out2in[out_label] = in_label
 
-            ma = ts_pat.match(a)
-            mb = ts_pat_named.match(b)
-            if not ma or not mb:
-                logging.warning(f"Line {i+1}: timestamp/speaker tag mismatch; returning baseline.")
-                return base_text
-
-            # timestamps must be identical
-            if ma.groups()[:3] != mb.groups()[:3]:
-                logging.warning(f"Line {i+1}: timestamp changed; returning baseline.")
-                return base_text
-
-            in_label = ma.group(4)   # baseline Speaker token (e.g., A)
-            out_label = mb.group(4)  # output Speaker token (e.g., B)
-
-            # Establish or verify bijection mapping
-            if in_label not in label_map_in2out:
-                if out_label in label_map_out2in and label_map_out2in[out_label] != in_label:
-                    logging.warning(f"Line {i+1}: non-bijective relabeling; returning baseline.")
-                    return base_text
-                label_map_in2out[in_label] = out_label
-                label_map_out2in[out_label] = in_label
-            else:
-                if label_map_in2out[in_label] != out_label:
-                    logging.warning(f"Line {i+1}: inconsistent relabeling; returning baseline.")
-                    return base_text
-
-        # All good — keep GPT output with appended names (and possibly swapped labels)
-        return out or base_text
+    return out or base_text
 
     except Exception as e:
         logging.warning(f"Name guessing step failed; returning baseline. Error: {e}")
@@ -496,15 +501,4 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
-
-
-
-
-
-
-
-
-
-
-
 
