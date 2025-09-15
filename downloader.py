@@ -209,17 +209,16 @@ def _build_attempts(
     enrich: List[str],
     prefer_format: str,
     geo_countries: List[str],
-    supports_cookies: bool,
+    supports_cookies: bool,   # kept for signature compatibility; not used now
     use_geo_bypass: bool,
-) -> List[Tuple[str, List[str]]]:
+) -> List[tuple[str, List[str]]]:
     """
-    Build a retry ladder that rotates:
-      - geo country (default: US)
-      - player_client (web-first when cookies are present)
-      - direct '-x' audio extraction
+    Very small ladder:
+      - for each geo: (A) direct extract to mp3, then (B) bestaudio container
+    All player_client permutations removed to avoid “completed but no file”.
     """
+    attempts: List[tuple[str, List[str]]] = []
     geo_list = geo_countries or ["US"]
-    attempts: List[Tuple[str, List[str]]] = []
 
     for country in geo_list:
         base_common = [
@@ -231,32 +230,20 @@ def _build_attempts(
             "-o", out_tmpl,
             "--force-ipv4",
         ] + enrich
+
         if use_geo_bypass:
             base_common += ["--geo-bypass", "--geo-bypass-country", country]
 
-        # Prefer grabbing a container stream first, then extract/convert if needed
-        common_fmt = base_common + ["-f", prefer_format]
+        # A) direct extract to mp3
+        attempts.append((f"{country}_extract",
+                         base_common + ["-x", "--audio-format", Config.AUDIO_FORMAT]))
 
-        if supports_cookies:
-            # android/ios clients do not support cookies → web clients only
-            attempts += [
-                (f"{country}_mweb",       common_fmt + ["--extractor-args", "youtube:player_client=mweb"]),
-                (f"{country}_tv_embed",   common_fmt + ["--extractor-args", "youtube:player_client=tv_embedded"]),
-                (f"{country}_web_forced", common_fmt + ["--extractor-args", "youtube:webpage_download_web=1"]),
-                (f"{country}_extract",    base_common + ["-x", "--audio-format", Config.AUDIO_FORMAT]),
-            ]
-        else:
-            # No cookies: rotate through all clients
-            attempts += [
-                (f"{country}_android",    common_fmt + ["--extractor-args", "youtube:player_client=android"]),
-                (f"{country}_ios",        common_fmt + ["--extractor-args", "youtube:player_client=ios"]),
-                (f"{country}_mweb",       common_fmt + ["--extractor-args", "youtube:player_client=mweb"]),
-                (f"{country}_tv_embed",   common_fmt + ["--extractor-args", "youtube:player_client=tv_embedded"]),
-                (f"{country}_web_forced", common_fmt + ["--extractor-args", "youtube:webpage_download_web=1"]),
-                (f"{country}_extract",    base_common + ["-x", "--audio-format", Config.AUDIO_FORMAT]),
-            ]
+        # B) bestaudio container (we’ll convert to mp3 if needed)
+        attempts.append((f"{country}_bestaudio",
+                         base_common + ["-f", prefer_format]))
 
     return attempts
+
 
 # --- Core Function ---
 def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -> Optional[Tuple[str, Dict[str, Any]]]:
@@ -390,7 +377,8 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
 
     supports_cookies = bool(temp_cookies_file or cookies_from_browser)
     # If a proxy is supplied, let the proxy decide region; skip geo-bypass flags.
-    use_geo_bypass = not bool(proxy_url)
+    use_geo_bypass = bool(getattr(Config, "YTDLP_GEO_BYPASS", True))
+
 
     attempts = _build_attempts(
         yt_path=YT_DLP_PATH,
@@ -468,4 +456,5 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
 
