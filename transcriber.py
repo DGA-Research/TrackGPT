@@ -1,21 +1,22 @@
-# transcriber.py
+# transcriber1.py
 import os
 import math
 import subprocess
-import openai
 import time
 import sys
 from pathlib import Path
 import tempfile
-import assemblyai as aai
 import logging
 from typing import List, Dict
+
 import re
 import string
+import openai
+import assemblyai as aai
 
 logger = logging.getLogger(__name__)
 
-# Constants
+# ---- Constants ----
 CHUNK_SIZE_LIMIT = 24 * 1024 * 1024  # 24 MB
 DEFAULT_OVERLAP_SECONDS = 2
 
@@ -524,7 +525,7 @@ Use these short samples to inform your guesses (do not copy these into the outpu
         logger.warning("Name guessing step failed; returning baseline. Error: %s", e)
         return base_text
 
-# ------------- Large-file chunking utilities (unchanged) ----------------
+# ------------- Large-file chunking utilities ----------------
 
 def _transcribe_large_file(audio_path: str, model: str, overlap_seconds: int, file_size: int) -> str:
     """Handle transcription of large audio files by splitting into chunks."""
