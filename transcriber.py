@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 import tempfile
 import logging
-from typing import List, Dict
+from typing import List, Dict, Optional, Set
 
 import re
 import string
@@ -54,44 +54,79 @@ def _bucket_words_to_segments(words, bucket_ms: int = 8000) -> list[dict]:
     for w in words:
         cur.append(w.text)
         if (w.end - cur_start) >= bucket_ms:
-            segs.append({"start": cur_start, "end": w.end, "text": " ".join(cur)})
+            segs.append({"start": w.end - (w.end - cur_start), "end": w.end, "text": " ".join(cur)})
             cur, cur_start = [], w.end
     if cur:
         segs.append({"start": cur_start, "end": words[-1].end, "text": " ".join(cur)})
     return segs
 
-# --- Name harvesting helpers (flexible, avoids generic tokens) ---
+# --- Name harvesting helpers (TIGHT, avoids generic tokens & titles) ---
 
-# Basic proper-name token: Smith, O'Neil, Mary-Jane
+import re
+from typing import List, Tuple, Optional, Dict, Set
+
+# Two/three-token capitalized names (Mary Jane, Scott Bessen, Lisa Ann Cook)
 NAME = r"[A-Z][a-z]+(?:[-'][A-Z][a-z]+)?"
-# Intro full names must have at least two tokens (e.g., "Tomi Lahren", "Charles Payne")
-INTRO_FULLNAME = rf"{NAME}\s+{NAME}(?:\s+{NAME})?"
+FULLNAME_2_3 = rf"\b({NAME}\s+{NAME}(?:\s+{NAME})?)\b"
 
-# Stoplist of generic capitalized tokens common in TV intros / filler
-BLOCKLIST = {
-    "fox", "news", "turning", "point", "usa", "founder", "host",
-    "contributor", "commentator",
-    "joining", "welcome", "now", "tonight", "breaking", "live",
-    "us", "me", "back", "thanks", "thank", "you", "okay", "ok",
-    "alright", "right", "so", "look", "listen",
+# Title + name patterns that appear in intros; keep only the name part
+TITLES = r"(?:Treasury|Commerce|Defense|Labor|Energy|Interior|Justice|Education|Transportation|State|Homeland|Veterans|Health|Agriculture)\s+Secretary|Chair|Chairman|Commissioner|Director|Senator|Representative|Gov(?:ernor)?|Mayor|Dr\.|Professor|Prof\."
+TITLE_NAME = rf"\b(?:{TITLES})\s+({NAME}\s+{NAME}(?:\s+{NAME})?)\b"
+
+# Common capitalized tokens in intros we do NOT want to treat as names
+STOP_WORDS: Set[str] = {
+    "Well", "Secretary", "Treasury", "Labor", "Statistics", "Bureau",
+    "Federal", "Reserve", "Board", "Commerce", "Chair", "Chairman",
+    "Commissioner", "Director", "President", "Doctor", "Dr", "Mr", "Ms",
+    "Mrs", "Sir", "Madam", "Gen", "General", "Judge", "Court",
+    "Supreme", "Economy", "International", "Economics", "Journal"
 }
 
-def _is_ok_name(s: str) -> bool:
-    w = s.strip().lower()
-    if w in BLOCKLIST:
-        return False
-    toks = [t.lower() for t in re.split(r"\s+", s.strip()) if t]
-    if not toks:
-        return False
-    if all(t in BLOCKLIST for t in toks):
-        return False
-    # If any token is a stopword AND there are >1 tokens, it's likely junk
-    if len(toks) > 1 and any(t in BLOCKLIST for t in toks):
-        return False
-    # Too long for a human name
-    if len(toks) > 3:
-        return False
-    return True
+def _clean_name(s: str) -> Optional[str]:
+    s = (s or "").strip()
+    if not s or any(ch.isdigit() for ch in s):
+        return None
+    toks = s.split()
+    if len(toks) < 2 or len(toks) > 3:
+        return None
+    if any(t in STOP_WORDS for t in toks):
+        return None
+    return s
+
+def harvest_name_candidates(text: str) -> List[str]:
+    """Pull plausible human names from the transcript intro and early lines."""
+    candidates: Set[str] = set()
+
+    # 1) Strict 2–3 token names
+    for m in re.finditer(FULLNAME_2_3, text or ""):
+        nm = _clean_name(m.group(1))
+        if nm:
+            candidates.add(nm)
+
+    # 2) Title + name (keep the name part only)
+    for m in re.finditer(TITLE_NAME, text or ""):
+        nm = _clean_name(m.group(1))
+        if nm:
+            candidates.add(nm)
+
+    # Sort by first appearance order for stable prompting
+    order: Dict[str, int] = {}
+    for nm in candidates:
+        idx = text.find(nm)
+        order[nm] = idx if idx >= 0 else 10**9
+    return [nm for nm, _ in sorted(order.items(), key=lambda kv: kv[1])]
+
+def detect_host_name(text: str) -> Optional[str]:
+    """
+    Heuristic: lines that begin with 'Well, NAME,' indicate NAME is the addressee (typically host).
+    """
+    for line in (text or "").splitlines():
+        m = re.match(r"^\[\d\d:\d\d:\d\d\]\s*Speaker\s+[A-Z0-9]+:\s*Well,\s*([A-Z][a-z]+)\s*,", line)
+        if m:
+            host = m.group(1)
+            if host not in STOP_WORDS:
+                return host
+    return None
 
 # Scrub obviously wrong assigned names like "(Joining)" -> "(Unknown)"
 BAD_NAME_TOKEN_RE = re.compile(
@@ -114,7 +149,8 @@ def _collect_addressed_names(text: str) -> List[str]:
     names = _ADDR_PAT.findall(text or "")
     seen = set(); out = []
     for n in names:
-        if _is_ok_name(n) and n not in seen:
+        n = (n or "").strip()
+        if n and n not in seen:
             seen.add(n); out.append(n)
     return out
 
@@ -129,7 +165,7 @@ def _scrub_bad_assigned_names(text: str) -> str:
 
     def repl(m: re.Match) -> str:
         name = (m.group(2) or "").strip()
-        if not _is_ok_name(name) or BAD_NAME_TOKEN_RE.search(name):
+        if BAD_NAME_TOKEN_RE.search(name):
             return f"{m.group(1)}Unknown{m.group(3)}"
         return m.group(0)
 
@@ -160,7 +196,7 @@ def _postfix_single_unknown_with_single_candidate(out_text: str, candidates: Lis
     if len(labels_with_unknown) != 1:
         return out_text
 
-    viable = [c for c in (candidates or []) if _is_ok_name(c) and c.lower() not in used_names]
+    viable = [c for c in (candidates or []) if c and c.lower() not in used_names]
     if len(viable) != 1:
         return out_text
 
@@ -202,7 +238,8 @@ def _force_other_label_name_when_addressed(base_text: str, out_text: str) -> str
         if label not in (a, b):
             continue
         for nm in _ADDR_PAT.findall(ln):
-            if _is_ok_name(nm):
+            nm = (nm or "").strip()
+            if nm:
                 addr_counts[label][nm] = addr_counts[label].get(nm, 0) + 1
 
     def top_name(freq: Dict[str, int]) -> str | None:
@@ -236,11 +273,35 @@ def _force_other_label_name_when_addressed(base_text: str, out_text: str) -> str
             new_lines.append(ln); continue
 
         current = (name or "").strip()
-        if (not current) or (current.lower() == "unknown") or BAD_NAME_TOKEN_RE.search(current) or not _is_ok_name(current):
+        if (not current) or (current.lower() == "unknown") or BAD_NAME_TOKEN_RE.search(current):
             ln = f"{pre} ({want}){colon}{rest}"
         new_lines.append(ln)
 
     return "\n".join(new_lines)
+
+def _enforce_not_addressed_name(out_text: str) -> str:
+    """
+    If a line begins with 'Well, NAME,' and that same NAME was assigned to that line's speaker,
+    replace it with (Unknown). This is a last-ditch guardrail.
+    """
+    if not out_text:
+        return out_text
+
+    def fix_line(ln: str) -> str:
+        m_tag = _NAME_TAG_PAT.match(ln)
+        if not m_tag:
+            return ln
+        pre, label, paren, name, colon, rest = m_tag.groups()
+        # Check for 'Well, NAME,' at start of speech text
+        m_addr = re.match(r"\s*Well,\s*([A-Z][a-z]+)\s*,", (rest or ""))
+        if m_addr:
+            addr_name = m_addr.group(1)
+            current = (name or "").strip()
+            if current == addr_name:
+                return f"{pre} (Unknown){colon}{rest}"
+        return ln
+
+    return "\n".join(fix_line(ln) for ln in out_text.splitlines())
 
 # ---------- Main ----------
 
@@ -353,54 +414,16 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
                 out_lines.append(line)
         return _scrub_bad_assigned_names("\n".join(out_lines))
 
-    # ---- Harvest lightweight cues for names/roles ----
-    first_talking_line = next((ln for ln in base_text.splitlines() if ln.strip()), "")
-
-    looks_like_host_intro = bool(re.search(
-        r"\b(Joining us now|We('?| a)re joined by|Welcome back|Joining me|Now to|We have with us)\b",
-        first_talking_line or "",
-        re.I,
-    ))
-
-    # Require >=2 tokens for intro names to avoid "Joining"
-    mentioned_in_intro = re.findall(rf"\b({INTRO_FULLNAME})\b", first_talking_line or "")
-    mentioned_in_intro = [n for n in mentioned_in_intro if _is_ok_name(n)]
-
-    # Names addressed like "Well, Liz," and tokens like "Liz," elsewhere
-    addressed_names = _collect_addressed_names(base_text)
-    comma_names = [n for n in dict.fromkeys(re.findall(r"\b([A-Z][a-zA-Z]+),", base_text or "")) if _is_ok_name(n)]
-
-    # Merge auto candidates + user hint
-    auto_candidates = mentioned_in_intro + addressed_names + comma_names
+    # ---- Stricter candidate harvesting & host detection ----
+    # Use full baseline text; optionally seed with user hint tokens
+    candidates = harvest_name_candidates(base_text)[:8]
     if speaker_hint:
         for tok in re.split(r"[;,/]| and | vs | with ", speaker_hint, flags=re.I):
             tok = (tok or "").strip()
-            if tok:
-                auto_candidates.append(tok)
-
-    candidates = list(dict.fromkeys(auto_candidates))[:8]
+            if tok and tok not in candidates and _clean_name(tok):
+                candidates.append(tok)
     candidate_block = ", ".join(candidates) if candidates else "None"
-
-    role_hints = []
-    if looks_like_host_intro:
-        role_hints.append(
-            "If the first line is an intro (e.g., 'Joining us now', 'We’re joined by'), "
-            "that line is the HOST speaking. Any person named in that line is a different speaker (the guest)."
-        )
-    if mentioned_in_intro:
-        role_hints.append(
-            "Names explicitly mentioned in the intro line (likely guests): "
-            + ", ".join(mentioned_in_intro) + "."
-        )
-    if addressed_names:
-        role_hints.append(
-            "If a line begins with 'Well, NAME,', NAME is being addressed (the other speaker), "
-            "not the current line's speaker."
-        )
-    role_hint_block = "\n".join(role_hints) if role_hints else "No extra role hints."
-
-    logger.debug("candidates=%s", candidate_block)
-    logger.debug("role_hints=%s", role_hint_block)
+    host_name = detect_host_name(base_text) or ""
 
     # ---- Multi-speaker: GPT name guessing with STRICT preservation ----
     client = openai.OpenAI(api_key=openai_key)
@@ -422,8 +445,7 @@ def transcribe_file(audio_file_path: str, openai_key: str, assemblyai_key: str, 
         label_samples.append(f"Speaker {lab} samples:\n{block}")
     profile_block = "\n\n".join(label_samples)
 
-    system_prompt = f"""
-You must preserve the input transcript EXACTLY:
+    system_prompt = f"""You must preserve the input transcript EXACTLY:
 - Do NOT change or remove timestamps like [HH:MM:SS].
 - Do NOT merge, split, reorder, or wrap lines.
 - Do NOT remove blank lines.
@@ -439,16 +461,22 @@ Rules:
 - Keep the exact token after "Speaker " unchanged (e.g., if input has Speaker A, do not change it to Speaker 1).
 - If unsure, use (Unknown).
 - Be consistent for the same Speaker across the whole file.
-- Use these candidates if relevant: {candidate_block}
+- Use these candidates if relevant: {candidate_block if candidate_block else "None"}.
 
-Additional disambiguation hints (follow strictly):
-{role_hint_block}
+STRICT disambiguation:
+- If a line begins with 'Well, NAME,', then NAME is the addressee (the *other* person), NOT the current line's speaker. NEVER assign NAME to that line's speaker in such cases.
+- If a host name is detected (e.g., '{host_name}' if any), assign it to the host speaker only and NEVER to the other speaker.
+- Prefer candidates that appear in the intro and have at least two tokens (e.g., 'Scott Bessen', 'Lisa Cook') over single tokens or titles.
+- Never use titles alone as names (e.g., do NOT use 'Secretary', 'Chair', 'Labor', 'Statistics', 'Well').
 
 Use these short samples to inform your guesses (do not copy these into the output):
 -----
 {profile_block}
 -----
-""".strip()
+
+Output format:
+- For each line, append ' (Full Name)' immediately after the 'Speaker X' tag, before the colon.
+- Do not add or remove any other text or whitespace."""
 
     try:
         resp = client.chat.completions.create(
@@ -464,13 +492,14 @@ Use these short samples to inform your guesses (do not copy these into the outpu
         # Post-fixes
         out = _scrub_bad_assigned_names(out)
         out = _force_other_label_name_when_addressed(base_text, out)
+        out = _enforce_not_addressed_name(out)
         out = _postfix_single_unknown_with_single_candidate(out, candidates)
 
         # Debug snapshots
         logger.debug("---- BASE (first 6 lines) ----\n%s", "\n".join(base_text.splitlines()[:6]))
         logger.debug("---- OUT  (first 6 lines) ----\n%s", "\n".join(out.splitlines()[:6]))
         logger.debug("Candidates: %s", candidate_block)
-        logger.debug("Role hints:\n%s", role_hint_block)
+        logger.debug("Host name: %s", host_name or "None")
 
         # ---- Safety validation with allowed relabeling (bijection mapping) ----
         base_lines = base_text.splitlines()
