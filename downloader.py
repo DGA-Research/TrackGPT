@@ -291,16 +291,6 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     # Log egress IP (helps diagnose region blocks)
     eg = _egress_info(proxy_url or None)
 
-    allowed = {"PR", "US"}
-    if not proxy_url and eg["country"] not in allowed:
-        log.error(
-            "Blocked region: egress country=%s. This video is only available in %s. "
-            "Set YTDLP_PROXY_URL to a PR/US proxy or run the app from PR/US.",
-            eg["country"], ", ".join(sorted(allowed))
-        )
-        # You can return None to stop early, or continue to attempts if you prefer
-        return None
-
     # --- Metadata (no download) ---
     ydl_opts: Dict[str, Any] = {
         'quiet': True,
@@ -377,9 +367,12 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
 
     supports_cookies = bool(temp_cookies_file or cookies_from_browser)
     # If a proxy is supplied, let the proxy decide region; skip geo-bypass flags.
-    use_geo_bypass = bool(getattr(Config, "YTDLP_GEO_BYPASS", True))
+    use_geo_bypass = bool(getattr(Config, "YTDLP_GEO_BYPASS", True)) and not bool(proxy_url)
 
 
+
+
+    
     attempts = _build_attempts(
         yt_path=YT_DLP_PATH,
         url=url,
@@ -393,7 +386,42 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
 
     # --- Run attempts ---
     last_err: Optional[Exception] = None
-    try:
+    last_stderr: str = ""
+    last_region_hint: List[str] = []
+    def _parse_allowed_regions(stderr_text: str) -> List[str]:
+        """
+        Parse lines like:
+          'This video is available in Puerto Rico, United States.'
+        Return a list of region codes/names; small name→ISO map included.
+        """
+        import re
+        m = re.search(r"This video is available in (.+?)\.", stderr_text, re.IGNORECASE | re.DOTALL)
+        if not m:
+            return []
+        raw = m.group(1)
+        parts = re.split(r",|\band\b", raw)
+        parts = [p.strip() for p in parts if p and p.strip()]
+        if not parts:
+            return []
+        name_to_code = {
+            "Puerto Rico": "PR", "United States": "US", "United Kingdom": "GB", "Great Britain": "GB",
+            "England": "GB", "Canada": "CA", "Australia": "AU", "Germany": "DE", "France": "FR",
+            "Spain": "ES", "Italy": "IT", "Mexico": "MX", "Japan": "JP", "South Korea": "KR",
+            "Korea, Republic of": "KR", "India": "IN", "Brazil": "BR", "Netherlands": "NL",
+            "Sweden": "SE", "Norway": "NO", "Denmark": "DK", "Finland": "FI", "Ireland": "IE",
+            "Austria": "AT", "Switzerland": "CH", "Poland": "PL",
+        }
+        out: List[str] = []
+        for p in parts:
+            out.append(name_to_code.get(p, p))
+        seen = set()
+        uniq: List[str] = []
+        for x in out:
+            if x not in seen:
+                seen.add(x)
+                uniq.append(x)
+        return uniq
+
         for label, cmd in attempts:
             try:
                 log.debug("[yt-dlp] Attempt '%s': %s", label, " ".join(cmd))
@@ -434,6 +462,11 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                 if stderr:
                     log.error("Stderr:\n%s", stderr)
                 last_err = e
+                last_stderr = stderr
+                # keep best “allowed regions” hint for final guidance
+                hint = _parse_allowed_regions(stderr)
+                if hint:
+                    last_region_hint = hint
                 continue
             except FileNotFoundError:
                 log.error("'%s' not found. Is yt-dlp installed and in PATH?", YT_DLP_PATH)
@@ -455,6 +488,24 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     log.error("All yt-dlp attempts failed.")
     if last_err:
         log.error("Last error: %s", last_err)
+    # Region-aware final guidance (portable)
+    if last_region_hint:
+        pretty = ", ".join(last_region_hint)
+        log.error(
+            "Region restriction detected. Allowed regions per site: %s. "
+            "Your current egress is %s (via %s).",
+            pretty, eg.get("country", "??"), eg.get("source", "unknown")
+        )
+        if not proxy_url:
+            log.error(
+                "Portable options (no local tunneling required): run this downloader on a host in an allowed region. "
+                "Optional: set YTDLP_PROXY_URL to an HTTP/HTTPS proxy in an allowed region."
+            )
+        else:
+            log.error(
+                "A proxy is configured but access still failed. Verify the proxy actually egresses from: %s.", pretty
+            )
     return None
+
 
 
