@@ -22,10 +22,10 @@ DEFAULT_OVERLAP_SECONDS = 2
 
 def format_timestamp(ms):
     total_seconds = ms / 1000
-    hours = int(total_seconds // 3600)
+    hours   = int(total_seconds // 3600)
     minutes = int((total_seconds % 3600) // 60)
     seconds = int(total_seconds % 60)
-    return f"{hours}:{minutes:02}:{seconds:02}"  # Always show HH:MM:SS.ss
+    return f"{hours:02}:{minutes:02}:{seconds:02}"
 
 
 def transcribe_file(audio_file_path, openai_key, assemblyai_key, speaker):
@@ -74,6 +74,27 @@ def transcribe_file(audio_file_path, openai_key, assemblyai_key, speaker):
                 chunk_start_time += 30000  # Add 30 seconds
     
     lines1 = "\n".join(lines)
+
+    
+    # --- Single-speaker fast path: preserve timestamps exactly, skip GPT ---
+    try:
+        spk_ids = {u.speaker for u in transcript.utterances or []}
+    except Exception:
+        spk_ids = set()
+
+    if len(spk_ids) == 1 and lines1.strip():
+        display_name = (speaker or "Unknown").strip()
+        # Append a guessed display name right after the 'Speaker X' token, keep everything else identical
+        import re
+        fast_pat = re.compile(r"^(\[\d{1,2}:\d{2}:\d{2}\]\s+Speaker\s+\S+)(:)", re.M)
+        out_lines = []
+        for line in lines1.splitlines():
+            m = fast_pat.match(line)
+            if m:
+                out_lines.append(f"{m.group(1)} ({display_name}){m.group(2)}{line[m.end():]}")
+            else:
+                out_lines.append(line)
+        return "\n".join(out_lines)
     
     # Set your OpenAI API key
     client = openai.OpenAI(
@@ -84,16 +105,24 @@ def transcribe_file(audio_file_path, openai_key, assemblyai_key, speaker):
 
     # System prompt for speaker labeling
     system_prompt = f"""
-        You are a transcription assistant. Given a monologue-style transcript of a conversation or interview, your task is to assign speaker labels (e.g., A, B, C...) and make a guess who is talking (e.g. Speaker A (Barack Obama):). Place the speaker labels before each line as clearly as possible.
+    You must preserve the input transcript EXACTLY:
+    - Do NOT change or remove timestamps like [H:MM:SS] or [HH:MM:SS].
+    - Do NOT merge, split, reorder, or wrap lines.
+    - Do NOT remove blank lines.
+    - Do NOT alter anything after the colon.
 
-        If there are multiple uknown speakers, differentiate them: Speaker A, Speaker B, etc. 
-            - Correct Example: Speaker A (Unknown A), Speaker B (Mary) Speaker C (Unknown B)
-            - Incorrect Example: Speaker A (Unknown), Speaker B (Mary), Speaker C (Unknown)
-        
-        Don't delete anything, just add guesses. Consider the spelling of {speaker}.
+    Task: ONLY append a guessed human-readable name in parentheses immediately after the 'Speaker X' tag on each line.
 
-        Only add labels — DO NOT rephrase or summarize anything.
-        """
+    Example:
+      Input:  [00:00:03] Speaker A: Thank you for coming.
+      Output: [00:00:03] Speaker A (Jane Doe): Thank you for coming.
+
+    Rules:
+    - Keep the exact token after "Speaker " unchanged (e.g., if input has Speaker 0 or Speaker A, don’t rename it).
+    - If unsure, use (Unknown).
+    - Be consistent for the same Speaker across the whole file.
+    - Consider the spelling of {speaker}.
+    """.strip()
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -108,6 +137,20 @@ def transcribe_file(audio_file_path, openai_key, assemblyai_key, speaker):
     print("LABELED TRANSCRIPT BY CHAT", response.choices[0].message.content)
     # return the labeled transcript
     return(response.choices[0].message.content)
+
+
+
+def _clean_hint_name(hint: str | None) -> str | None:
+    """Pick a simple display name from speaker_hint like 'Donald Trump; Charles Payne'."""
+    if not hint:
+        return None
+    parts = re.split(r"[;,/]| and | with | vs ", hint, flags=re.IGNORECASE)
+    for p in parts:
+        name = p.strip()
+        if name:
+            return re.sub(r"\s+", " ", name)
+    return None
+
 
 def _transcribe_large_file(audio_path: str, model: str, overlap_seconds: int, file_size: int) -> str:
     """Handle transcription of large audio files by splitting into chunks."""
@@ -239,6 +282,7 @@ def _cleanup_temp_files(file_paths: List[Path]):
         logger.error(f"Failed to delete {failed_deletions} temporary files")
     else:
         logger.info("All temporary files cleaned up successfully")
+
 
 
 
