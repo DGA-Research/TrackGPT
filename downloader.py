@@ -28,6 +28,23 @@ from config import Config
 
 log = logging.getLogger(__name__)
 
+# ---- Optional: use Apify Proxy automatically if available ----
+apify_pw = os.getenv("APIFY_PROXY_PASSWORD", "")
+apify_country = os.getenv("APIFY_PROXY_COUNTRY", "US")
+proxy_url = os.getenv("YTDLP_PROXY_URL", "").strip()
+
+if apify_pw and not proxy_url:
+    # Apify Proxy format: http://auto:<PASSWORD>@proxy.apify.com:8000/?country=US
+    proxy_url = f"http://auto:{apify_pw}@proxy.apify.com:8000/?country={apify_country}"
+    log.info("Using Apify Proxy for yt-dlp with country=%s", apify_country)
+
+# When building the CLI args:
+enrich = []
+# ... UA / headers here ...
+if proxy_url:
+    enrich += ["--proxy", proxy_url]
+
+
 log.info(
     "yt-dlp cfg: cookies_file=%r ua_set=%s retries=%s",
     getattr(Config, "YTDLP_COOKIES_FILE", ""),
@@ -774,6 +791,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                 return ap
 
     return None
+
 
 
 
