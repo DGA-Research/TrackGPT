@@ -7,7 +7,10 @@ from docx import Document
 import io
 from html2docx import html2docx
 
-import os, logging
+import os
+
+import logging
+log = logging.getLogger(__name__)
 
 
 
