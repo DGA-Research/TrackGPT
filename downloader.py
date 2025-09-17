@@ -629,9 +629,10 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     # All yt-dlp attempts failed → try Apify
     log.error("All yt-dlp attempts failed.")
     apify_result = _apify_download_audio(url, output_dir, base_filename)
-    if apify_result:
-        return apify_result
-
+    if not apify_result:
+        raise RuntimeError("Download failed: yt-dlp + Apify both failed")
+    return apify_result
+    
     if last_err:
         err_text = f"{last_err}"
         log.error("Last error: %s", err_text)
@@ -655,4 +656,5 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                 return ap
 
     return None
+
 
