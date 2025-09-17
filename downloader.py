@@ -151,6 +151,9 @@ def _ensure_mp3(path_in: Path, path_out: Path) -> Optional[str]:
 
 
 # ---------- Apify fallbacks ----------
+
+# --- Apify fallbacks ---
+
 def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> tuple[str, dict] | None:
     token = os.getenv("APIFY_TOKEN", getattr(Config, "APIFY_TOKEN", "")).strip()
     timeout_s = int(os.getenv("APIFY_TIMEOUT_MS", "180000")) / 1000
@@ -163,8 +166,14 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> tup
         f"run-sync-get-dataset-items?token={token}"
     )
 
-    # We’ll try two shapes; some actor versions accept only one of them.
+    # ✅ Try the new schema first, then old ones for backward-compat
     payloads = [
+        {
+            "videos": [{"url": url}],
+            "convertToAudio": True,
+            "audioFormat": "mp3",
+            "proxy": {"useApifyProxy": True, "apifyProxyCountry": "US"},
+        },
         {
             "videoUrl": url,
             "convertToAudio": True,
@@ -184,7 +193,6 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> tup
             log.info("Apify fallback: requesting actor run (payload keys=%s)", list(payload.keys()))
             resp = requests.post(endpoint, json=payload, timeout=timeout_s)
             if resp.status_code != 200:
-                # **Log the server message** to see why it’s 400
                 log.error("Apify HTTP %s. Body: %s", resp.status_code, resp.text[:4000])
                 continue
 
@@ -208,7 +216,7 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> tup
             with requests.get(audio_url, stream=True, timeout=timeout_s) as r:
                 r.raise_for_status()
                 with open(out_path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=262144):
+                    for chunk in r.iter_content(chunk_size=262_144):
                         if chunk:
                             f.write(chunk)
 
@@ -229,6 +237,7 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> tup
             log.error("Apify fallback failed: %s", e, exc_info=True)
 
     return None
+
 
 
 
@@ -253,6 +262,7 @@ def _apify_ytdl_fallback(
     )
 
     payloads = [
+        {"videos": [{"url": url}], "proxy": {"useApifyProxy": True, "apifyProxyCountry": "US"}},
         {"videoUrl": url, "proxy": {"useApifyProxy": True, "apifyProxyCountry": "US"}},
         {"videoUrls": [url], "proxy": {"useApifyProxy": True, "apifyProxyCountry": "US"}},
     ]
@@ -656,5 +666,6 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                 return ap
 
     return None
+
 
 
