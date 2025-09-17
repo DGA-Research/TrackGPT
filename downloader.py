@@ -35,7 +35,7 @@ proxy_url = os.getenv("YTDLP_PROXY_URL", "").strip()
 
 if apify_pw and not proxy_url:
     # Apify Proxy format: http://auto:<PASSWORD>@proxy.apify.com:8000/?country=US
-    proxy_url = f"http://auto:{apify_pw}@proxy.apify.com:8000/?country={apify_country}"
+    proxy_url = f"http://DGA_Scrapes:{apify_pw}@proxy.apify.com:8000/?country={apify_country}"
     log.info("Using Apify Proxy for yt-dlp with country=%s", apify_country)
 
 # When building the CLI args:
@@ -777,6 +777,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
 
 
 
