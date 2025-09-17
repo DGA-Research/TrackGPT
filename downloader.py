@@ -151,66 +151,85 @@ def _ensure_mp3(path_in: Path, path_out: Path) -> Optional[str]:
 
 
 # ---------- Apify fallbacks ----------
-
 def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> tuple[str, dict] | None:
-    token = os.getenv("APIFY_TOKEN", "")
-    timeout_ms = int(os.getenv("APIFY_TIMEOUT_MS", "180000"))
+    token = os.getenv("APIFY_TOKEN", getattr(Config, "APIFY_TOKEN", "")).strip()
+    timeout_s = int(os.getenv("APIFY_TIMEOUT_MS", "180000")) / 1000
     if not token:
         log.warning("APIFY_TOKEN not set; skipping Apify fallback.")
         return None
 
     endpoint = (
         "https://api.apify.com/v2/acts/streamers~youtube-video-downloader/"
-        "run-sync-get-dataset-items?token=" + token
+        f"run-sync-get-dataset-items?token={token}"
     )
 
-    payload = {
-        "videoUrl": url,
-        "convertToAudio": True,
-        "audioFormat": "mp3",
-    }
+    # We’ll try two shapes; some actor versions accept only one of them.
+    payloads = [
+        {
+            "videoUrl": url,
+            "convertToAudio": True,
+            "audioFormat": "mp3",
+            "proxy": {"useApifyProxy": True, "apifyProxyCountry": "US"},
+        },
+        {
+            "videoUrls": [url],
+            "convertToAudio": True,
+            "audioFormat": "mp3",
+            "proxy": {"useApifyProxy": True, "apifyProxyCountry": "US"},
+        },
+    ]
 
-    try:
-        log.info("Apify fallback: requesting actor run for %s", url)
-        resp = requests.post(endpoint, json=payload, timeout=timeout_ms/1000)
-        resp.raise_for_status()
-        items = resp.json() if resp.content else []
-        if not isinstance(items, list) or not items:
-            log.error("Apify returned no items.")
-            return None
+    for payload in payloads:
+        try:
+            log.info("Apify fallback: requesting actor run (payload keys=%s)", list(payload.keys()))
+            resp = requests.post(endpoint, json=payload, timeout=timeout_s)
+            if resp.status_code != 200:
+                # **Log the server message** to see why it’s 400
+                log.error("Apify HTTP %s. Body: %s", resp.status_code, resp.text[:4000])
+                continue
 
-        it = items[0]
-        audio_url = (
-            it.get("audio")
-            or (it.get("downloads") or {}).get("audio")
-            or it.get("url")
-        )
+            items = resp.json() if resp.content else []
+            if not isinstance(items, list) or not items:
+                log.error("Apify returned no dataset items. Body: %s", resp.text[:1000])
+                continue
 
-        if not audio_url:
-            log.error("Apify response missing audio URL: %s", json.dumps(it)[:500])
-            return None
+            it = items[0]
+            audio_url = (
+                it.get("audio")
+                or (it.get("downloads") or {}).get("audio")
+                or it.get("audioUrl")
+                or it.get("url")
+            )
+            if not audio_url:
+                log.error("Apify response missing audio URL: %s", json.dumps(it)[:1000])
+                continue
 
-        out_path = output_dir / f"{base_filename}.mp3"
-        with requests.get(audio_url, stream=True, timeout=timeout_ms/1000) as r:
-            r.raise_for_status()
-            with open(out_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=1024 * 256):
-                    if chunk:
-                        f.write(chunk)
+            out_path = output_dir / f"{base_filename}.mp3"
+            with requests.get(audio_url, stream=True, timeout=timeout_s) as r:
+                r.raise_for_status()
+                with open(out_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=262144):
+                        if chunk:
+                            f.write(chunk)
 
-        if out_path.exists() and out_path.stat().st_size > 0:
-            log.info("Apify fallback success → %s", out_path)
-            meta = {"extractor": "apify", "webpage_url": url, "download_attempt": "apify_fallback"}
-            return str(out_path), meta
+            if out_path.exists() and out_path.stat().st_size > 0:
+                log.info("Apify fallback success → %s", out_path)
+                meta = {
+                    "extractor": "apify",
+                    "webpage_url": url,
+                    "download_attempt": "apify_fallback",
+                    "apify_item": it.get("id") or it.get("runId"),
+                }
+                return str(out_path), meta
 
-        log.error("Apify fallback produced no file.")
-        return None
+            log.error("Apify fallback produced no file.")
+        except requests.RequestException as e:
+            log.error("Apify network error: %s", e)
+        except Exception as e:
+            log.error("Apify fallback failed: %s", e, exc_info=True)
 
-    except requests.HTTPError as e:
-        log.error("Apify HTTP error: %s %s", e.response.status_code if e.response else "?", e)
-    except Exception as e:
-        log.error("Apify fallback failed: %s", e, exc_info=True)
     return None
+
 
 
 def _apify_ytdl_fallback(
@@ -220,159 +239,154 @@ def _apify_ytdl_fallback(
     audio_format: str,
     ffmpeg_path: str,
 ) -> Optional[Tuple[str, Dict[str, Any]]]:
-    """
-    Try Apify's 'streamers/youtube-video-downloader' actor as a region-locked fallback.
-    Requires APIFY_TOKEN (env or Config). Downloads best audio (or video -> audio).
-    Returns (audio_path, metadata) or None.
-    """
     token = os.getenv("APIFY_TOKEN", getattr(Config, "APIFY_TOKEN", "")).strip()
     if not token:
         log.warning("APIFY_TOKEN not configured; skipping Apify fallback.")
         return None
 
     timeout_ms = int(os.getenv("APIFY_TIMEOUT_MS", getattr(Config, "APIFY_TIMEOUT_MS", 180_000)))
+    timeout_s = max(60, timeout_ms / 1000)
+
     endpoint = (
         "https://api.apify.com/v2/acts/streamers~youtube-video-downloader/"
         f"run-sync-get-dataset-items?token={token}&timeout={timeout_ms}"
     )
 
-    payload = {"videoUrls": [url]}
+    payloads = [
+        {"videoUrl": url, "proxy": {"useApifyProxy": True, "apifyProxyCountry": "US"}},
+        {"videoUrls": [url], "proxy": {"useApifyProxy": True, "apifyProxyCountry": "US"}},
+    ]
 
-    try:
-        log.info("Apify fallback: requesting actor run for URL.")
-        resp = requests.post(
-            endpoint,
-            headers={"Content-Type": "application/json"},
-            data=json.dumps(payload),
-            timeout=(30, max(60, timeout_ms / 1000)),
-        )
-        if resp.status_code != 200:
-            log.error("Apify fallback HTTP %s: %s", resp.status_code, resp.text[:4000])
-            return None
-
+    for payload in payloads:
         try:
-            items = resp.json()
-        except Exception:
-            text = resp.text.strip()
-            if not text:
-                log.error("Apify fallback returned empty body.")
-                return None
-            first_line = text.splitlines()[0]
+            log.info("Apify fallback (ytdl path): requesting actor (payload keys=%s)", list(payload.keys()))
+            resp = requests.post(
+                endpoint,
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(payload),
+                timeout=(30, timeout_s),
+            )
+            if resp.status_code != 200:
+                log.error("Apify fallback HTTP %s: %s", resp.status_code, resp.text[:4000])
+                continue
+
             try:
-                items = json.loads(first_line)
-            except Exception as e:
-                log.error("Apify fallback: could not parse response: %s", e)
-                return None
+                items = resp.json()
+            except Exception:
+                text = resp.text.strip()
+                first_line = (text.splitlines() or [""])[0]
+                items = json.loads(first_line) if first_line else []
 
-        if isinstance(items, dict):
-            items = [items]
-        if not isinstance(items, list) or not items:
-            log.error("Apify fallback: unexpected response structure.")
-            return None
+            if isinstance(items, dict):
+                items = [items]
+            if not isinstance(items, list) or not items:
+                log.error("Apify fallback: unexpected response structure. Body: %s", resp.text[:1000])
+                continue
 
-        best_audio_url = None
-        best_video_url = None
-        item0 = items[0]
-        downloads = item0.get("downloads") or []
+            item0 = items[0]
+            downloads = item0.get("downloads") or []
 
-        for d in downloads:
-            t = (d.get("type") or "").lower()
-            f = (d.get("format") or "").lower()
-            u = d.get("url")
-            if u and ("audio" in t or f in ("m4a", "webm", "opus", "mp3", "ogg")):
-                best_audio_url = u
-                break
+            best_audio_url = None
+            best_video_url = None
 
-        if not best_audio_url:
             for d in downloads:
+                t = (d.get("type") or "").lower()
                 f = (d.get("format") or "").lower()
                 u = d.get("url")
-                if u and (f in ("mp4", "webm") or "video" in (d.get("type") or "").lower()):
-                    best_video_url = u
+                if u and ("audio" in t or f in ("m4a", "webm", "opus", "mp3", "ogg")):
+                    best_audio_url = u
                     break
 
-        if not best_audio_url:
-            for key in ("audioUrl", "audio", "audio_link"):
-                if item0.get(key):
-                    best_audio_url = item0[key]
-                    break
+            if not best_audio_url:
+                for d in downloads:
+                    f = (d.get("format") or "").lower()
+                    u = d.get("url")
+                    if u and (f in ("mp4", "webm") or "video" in (d.get("type") or "").lower()):
+                        best_video_url = u
+                        break
 
-        if not best_audio_url and not best_video_url:
-            if item0.get("url"):
-                best_video_url = item0["url"]
+            if not best_audio_url:
+                for key in ("audioUrl", "audio", "audio_link"):
+                    if item0.get(key):
+                        best_audio_url = item0[key]
+                        break
 
-        if not best_audio_url and not best_video_url:
-            log.error("Apify fallback: no downloadable URLs found in actor output.")
-            return None
+            if not best_audio_url and not best_video_url:
+                if item0.get("url"):
+                    best_video_url = item0["url"]
 
-        tmp_in = output_dir / f"{base_filename}.apify.tmp"
-        tmp_out = output_dir / f"{base_filename}.{audio_format}"
+            if not best_audio_url and not best_video_url:
+                log.error("Apify fallback: no downloadable URLs in actor output.")
+                continue
 
-        def _http_download(src_url: str, dst_path: Path) -> bool:
-            try:
-                with requests.get(src_url, stream=True, timeout=(15, 120)) as r:
-                    r.raise_for_status()
-                    with open(dst_path, "wb") as f:
-                        for chunk in r.iter_content(chunk_size=1024 * 256):
-                            if chunk:
-                                f.write(chunk)
-                return True
-            except Exception as e:
-                log.error("Apify fallback: download failed: %s", e)
-                return False
+            tmp_in = output_dir / f"{base_filename}.apify.tmp"
+            tmp_out = output_dir / f"{base_filename}.{audio_format}"
 
-        if best_audio_url:
-            log.info("Apify fallback: downloading direct audio…")
-            if not _http_download(best_audio_url, tmp_out):
-                return None
-            if tmp_out.suffix.lower() != f".{audio_format}":
-                tmp_in2 = tmp_in.with_suffix(Path(best_audio_url).suffix or ".bin")
+            def _http_download(src_url: str, dst_path: Path) -> bool:
                 try:
-                    tmp_out.rename(tmp_in2)
-                except Exception:
-                    if not _http_download(best_audio_url, tmp_in2):
-                        return None
-                final = _ensure_mp3(tmp_in2, tmp_out)
-                if not final:
-                    return None
+                    with requests.get(src_url, stream=True, timeout=(15, 120)) as r:
+                        r.raise_for_status()
+                        with open(dst_path, "wb") as f:
+                            for chunk in r.iter_content(chunk_size=262144):
+                                if chunk:
+                                    f.write(chunk)
+                    return True
+                except Exception as e:
+                    log.error("Apify fallback: download failed: %s", e)
+                    return False
+
+            if best_audio_url:
+                log.info("Apify fallback: downloading direct audio…")
+                if not _http_download(best_audio_url, tmp_out):
+                    continue
+                if tmp_out.suffix.lower() != f".{audio_format}":
+                    temp_src = tmp_in.with_suffix(Path(best_audio_url).suffix or ".bin")
+                    try:
+                        tmp_out.rename(temp_src)
+                    except Exception:
+                        if not _http_download(best_audio_url, temp_src):
+                            continue
+                    final = _ensure_mp3(temp_src, tmp_out)
+                    try:
+                        if temp_src.exists():
+                            temp_src.unlink()
+                    except Exception:
+                        pass
+                    if not final:
+                        continue
+                audio_path = str(tmp_out)
+            else:
+                log.info("Apify fallback: downloading video then extracting audio…")
+                if not _http_download(best_video_url, tmp_in):
+                    continue
+                final = _ensure_mp3(tmp_in, tmp_out)
                 try:
-                    if tmp_in2.exists():
-                        tmp_in2.unlink()
+                    if tmp_in.exists():
+                        tmp_in.unlink()
                 except Exception:
                     pass
-            audio_path = str(tmp_out)
-        else:
-            log.info("Apify fallback: downloading video then extracting audio…")
-            if not _http_download(best_video_url, tmp_in):
-                return None
-            final = _ensure_mp3(tmp_in, tmp_out)
-            if not final:
-                return None
-            audio_path = final
+                if not final:
+                    continue
+                audio_path = final
 
-        meta = {
-            "title": item0.get("title") or "Unknown Title",
-            "uploader": item0.get("uploader") or item0.get("channel") or "Unknown Uploader",
-            "duration": item0.get("duration"),
-            "webpage_url": url,
-            "extractor": "apify-streamers/youtube-video-downloader",
-            "download_attempt": "apify_fallback",
-            "apify_run_id": item0.get("id") or item0.get("runId"),
-            "thumbnail": item0.get("thumbnail"),
-            "view_count": item0.get("viewCount"),
-        }
-        log.info("Apify fallback succeeded → %s", audio_path)
-        try:
-            if tmp_in.exists():
-                tmp_in.unlink()
-        except Exception:
-            pass
-        return (audio_path, meta)
+            meta = {
+                "title": item0.get("title") or "Unknown Title",
+                "uploader": item0.get("uploader") or item0.get("channel") or "Unknown Uploader",
+                "duration": item0.get("duration"),
+                "webpage_url": url,
+                "extractor": "apify-streamers/youtube-video-downloader",
+                "download_attempt": "apify_fallback",
+                "apify_run_id": item0.get("id") or item0.get("runId"),
+                "thumbnail": item0.get("thumbnail"),
+                "view_count": item0.get("viewCount"),
+            }
+            log.info("Apify fallback succeeded → %s", audio_path)
+            return (audio_path, meta)
 
-    except requests.RequestException as e:
-        log.error("Apify fallback network error: %s", e)
-    except Exception as e:
-        log.error("Apify fallback unexpected error: %s", e, exc_info=True)
+        except requests.RequestException as e:
+            log.error("Apify fallback network error: %s", e)
+        except Exception as e:
+            log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
 
@@ -641,3 +655,4 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                 return ap
 
     return None
+
