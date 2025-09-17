@@ -386,96 +386,60 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
 
     # --- Run attempts ---
     last_err: Optional[Exception] = None
-    last_stderr: str = ""
-    last_region_hint: List[str] = []
-    def _parse_allowed_regions(stderr_text: str) -> List[str]:
-        """
-        Parse lines like:
-          'This video is available in Puerto Rico, United States.'
-        Return a list of region codes/names; small name→ISO map included.
-        """
-        import re
-        m = re.search(r"This video is available in (.+?)\.", stderr_text, re.IGNORECASE | re.DOTALL)
-        if not m:
-            return []
-        raw = m.group(1)
-        parts = re.split(r",|\band\b", raw)
-        parts = [p.strip() for p in parts if p and p.strip()]
-        if not parts:
-            return []
-        name_to_code = {
-            "Puerto Rico": "PR", "United States": "US", "United Kingdom": "GB", "Great Britain": "GB",
-            "England": "GB", "Canada": "CA", "Australia": "AU", "Germany": "DE", "France": "FR",
-            "Spain": "ES", "Italy": "IT", "Mexico": "MX", "Japan": "JP", "South Korea": "KR",
-            "Korea, Republic of": "KR", "India": "IN", "Brazil": "BR", "Netherlands": "NL",
-            "Sweden": "SE", "Norway": "NO", "Denmark": "DK", "Finland": "FI", "Ireland": "IE",
-            "Austria": "AT", "Switzerland": "CH", "Poland": "PL",
-        }
-        out: List[str] = []
-        for p in parts:
-            out.append(name_to_code.get(p, p))
-        seen = set()
-        uniq: List[str] = []
-        for x in out:
-            if x not in seen:
-                seen.add(x)
-                uniq.append(x)
-        return uniq
+    try:
+        for label, cmd in attempts:
+            try:
+                log.debug("[yt-dlp] Attempt '%s': %s", label, " ".join(cmd))
+                result = subprocess.run(cmd, check=True, capture_output=True, text=True, encoding='utf-8')
 
-    for label, cmd in attempts:
-        try:
-            log.debug("[yt-dlp] Attempt '%s': %s", label, " ".join(cmd))
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True, encoding='utf-8')
-            if result.stdout:
-                log.info("yt-dlp stdout:\n%s", result.stdout)
-            if result.stderr:
-                log.debug("yt-dlp stderr:\n%s", result.stderr)
+                if result.stdout:
+                    log.info("yt-dlp stdout:\n%s", result.stdout)
+                if result.stderr:
+                    log.debug("yt-dlp stderr:\n%s", result.stderr)
 
-            # Success case 1: final mp3 exists
-            if final_audio_path.exists():
-                log.info("Success (%s) → %s", label, final_audio_path)
-                return (str(final_audio_path), {**metadata, "download_attempt": label})
+                # Success case 1: final mp3 exists
+                if final_audio_path.exists():
+                    log.info("Success (%s) → %s", label, final_audio_path)
+                    return (str(final_audio_path), {**metadata, "download_attempt": label})
 
-            # Success case 2: another audio exists; convert if needed
-            audio_candidates = sorted(
-                output_dir.glob(f"{base_filename}.*"),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True
-            )
-            for cand in audio_candidates:
-                if cand.suffix.lower() in [".mp3", ".m4a", ".webm", ".opus", ".ogg", ".wav"]:
-                    if cand.suffix.lower() == ".mp3":
-                        log.info("Success (%s) → %s", label, cand)
-                        return (str(cand), {**metadata, "download_attempt": label})
-                    out = _ensure_mp3(cand, final_audio_path)
-                    if out:
-                        log.info("Success (%s) + convert → %s", label, out)
-                        return (out, {**metadata, "download_attempt": label})
+                # Success case 2: another audio exists; convert if needed
+                audio_candidates = sorted(
+                    output_dir.glob(f"{base_filename}.*"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True
+                )
+                for cand in audio_candidates:
+                    if cand.suffix.lower() in [".mp3", ".m4a", ".webm", ".opus", ".ogg", ".wav"]:
+                        if cand.suffix.lower() == ".mp3":
+                            log.info("Success (%s) → %s", label, cand)
+                            return (str(cand), {**metadata, "download_attempt": label})
+                        out = _ensure_mp3(cand, final_audio_path)
+                        if out:
+                            log.info("Success (%s) + convert → %s", label, out)
+                            return (out, {**metadata, "download_attempt": label})
 
-            log.error("Attempt '%s' completed but no usable audio file was produced.", label)
-            last_err = RuntimeError("yt-dlp completed without producing expected output.")
+                log.error("Attempt '%s' completed but no usable audio file was produced.", label)
+                last_err = RuntimeError("yt-dlp completed without producing expected output.")
 
-        except subprocess.CalledProcessError as e:
-            stderr = e.stderr or ""
-            log.error("yt-dlp failed (Exit %s) on attempt '%s'. URL: %s", e.returncode, label, url)
-            log.error("Command: %s", " ".join(e.cmd if isinstance(e.cmd, list) else [str(e.cmd)]))
-            if stderr:
-                log.error("Stderr:\n%s", stderr)
-            last_err = e
-            last_stderr = stderr
-            # keep best “allowed regions” hint for final guidance
-            hint = _parse_allowed_regions(stderr)
-            if hint:
-                last_region_hint = hint
-            continue
-        except FileNotFoundError:
-            log.error("'%s' not found. Is yt-dlp installed and in PATH?", YT_DLP_PATH)
-            last_err = FileNotFoundError("yt-dlp not found")
-            break
-        except Exception as e:
-            log.error("Unexpected error during download (attempt '%s'): %s", label, e, exc_info=True)
-            last_err = e
-            continue
+            except subprocess.CalledProcessError as e:
+                stderr = e.stderr or ""
+                log.error("yt-dlp failed (Exit %s) on attempt '%s'. URL: %s", e.returncode, label, url)
+                log.error("Command: %s", " ".join(e.cmd if isinstance(e.cmd, list) else [str(e.cmd)]))
+                if stderr:
+                    log.error("Stderr:\n%s", stderr)
+                last_err = e
+                continue
+
+            except FileNotFoundError:
+                log.error("'%s' not found. Is yt-dlp installed and in PATH?", YT_DLP_PATH)
+                last_err = FileNotFoundError("yt-dlp not found")
+                break
+
+            except Exception as e:
+                log.error("Unexpected error during download (attempt '%s'): %s", label, e, exc_info=True)
+                last_err = e
+                continue
+
     finally:
         # Always cleanup temp cookies we created
         for p in temp_paths_to_cleanup:
@@ -488,26 +452,5 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     log.error("All yt-dlp attempts failed.")
     if last_err:
         log.error("Last error: %s", last_err)
-    # Region-aware final guidance (portable)
-    if last_region_hint:
-        pretty = ", ".join(last_region_hint)
-        log.error(
-            "Region restriction detected. Allowed regions per site: %s. "
-            "Your current egress is %s (via %s).",
-            pretty, eg.get("country", "??"), eg.get("source", "unknown")
-        )
-        if not proxy_url:
-            log.error(
-                "Portable options (no local tunneling required): run this downloader on a host in an allowed region. "
-                "Optional: set YTDLP_PROXY_URL to an HTTP/HTTPS proxy in an allowed region."
-            )
-        else:
-            log.error(
-                "A proxy is configured but access still failed. Verify the proxy actually egresses from: %s.", pretty
-            )
     return None
-
-
-
-
 
