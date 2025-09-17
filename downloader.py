@@ -470,7 +470,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
             continue
         except FileNotFoundError:
             log.error("'%s' not found. Is yt-dlp installed and in PATH?", YT_DLP_PATH)
-                last_err = FileNotFoundError("yt-dlp not found")
+            last_err = FileNotFoundError("yt-dlp not found")
             break
         except Exception as e:
             log.error("Unexpected error during download (attempt '%s'): %s", label, e, exc_info=True)
@@ -506,6 +506,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                 "A proxy is configured but access still failed. Verify the proxy actually egresses from: %s.", pretty
             )
     return None
+
 
 
 
