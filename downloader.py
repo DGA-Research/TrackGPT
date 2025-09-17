@@ -528,13 +528,25 @@ def _apify_ytdl_fallback(
 
 # ---------- Core function ----------
 
+# --- Utility: detect region-lock quickly ---
+def _is_region_lock(text: str) -> bool:
+    if not text:
+        return False
+    needles = [
+        "The uploader has not made this video available in your country",
+        "This video is not available in your country",
+        "is not available in your country",
+    ]
+    t = text or ""
+    return any(n in t for n in needles)
+
 def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -> Optional[Tuple[str, Dict[str, Any]]]:
     """
     Downloads audio from a given URL using yt-dlp with resilient fallbacks.
-
-    Returns:
-        (path_to_audio, metadata) if successful; otherwise None.
+    Immediately triggers Apify fallback on first region-lock error.
     """
+    import base64
+
     # Sanity: yt-dlp + ffmpeg present?
     if not YT_DLP_PATH:
         log.error("yt-dlp executable not found. Cannot download.")
@@ -551,58 +563,42 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         return None
 
     # Paths & filenames
-    output_path_template = output_dir / f"{base_filename}.%(ext)s"
+    output_path_template = str(output_dir / f"{base_filename}.%(ext)s")
     final_audio_path = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
 
-    # --- Cookies & UA setup ---
-    temp_paths_to_cleanup: List[str] = []
+    # --- Cookies (file, b64, browser) → temp file (writable) ---
+    temp_paths_to_cleanup: list[str] = []
+    temp_cookies_file: Optional[str] = None
+
     orig_cookies_file = os.getenv("YTDLP_COOKIES_FILE", getattr(Config, "YTDLP_COOKIES_FILE", "")).strip()
-    cookies_b64 = os.getenv(
-        "YTDLP_COOKIES_B64",
-        getattr(Config, "YTDLP_COOKIES_B64", "") if hasattr(Config, "YTDLP_COOKIES_B64") else ""
-    ).strip()
-    cookies_from_browser = os.getenv(
-        "YTDLP_COOKIES_FROM_BROWSER",
-        getattr(Config, "YTDLP_COOKIES_FROM_BROWSER", "") if hasattr(Config, "YTDLP_COOKIES_FROM_BROWSER") else ""
-    ).strip()
+    cookies_b64 = os.getenv("YTDLP_COOKIES_B64", getattr(Config, "YTDLP_COOKIES_B64", "") if hasattr(Config, "YTDLP_COOKIES_B64") else "").strip()
+    cookies_from_browser = os.getenv("YTDLP_COOKIES_FROM_BROWSER", getattr(Config, "YTDLP_COOKIES_FROM_BROWSER", "") if hasattr(Config, "YTDLP_COOKIES_FROM_BROWSER") else "").strip()
     user_agent = os.getenv("YTDLP_USER_AGENT", getattr(Config, "YTDLP_USER_AGENT", "")).strip()
 
-    # Allow cookies via URL as a fallback source
-    cookies_url = os.getenv(
-        "YTDLP_COOKIES_URL",
-        getattr(Config, "YTDLP_COOKIES_URL", "") if hasattr(Config, "YTDLP_COOKIES_URL") else ""
-    ).strip()
-    if cookies_url and not orig_cookies_file:
-        fetched = _download_cookies_to_temp(cookies_url)
-        if fetched:
-            orig_cookies_file = fetched
-            temp_paths_to_cleanup.append(fetched)
-
-    # If B64 is provided, materialize it to a temp file and prefer that
+    # If B64 is provided, materialize to temp and prefer it
     if cookies_b64:
         try:
-            fd, tmp_path_from_b64 = tempfile.mkstemp(suffix=".cookies.txt")
+            fd, tmp_path = tempfile.mkstemp(suffix=".cookies.txt")
             os.close(fd)
-            with open(tmp_path_from_b64, "wb") as f:
+            with open(tmp_path, "wb") as f:
                 f.write(base64.b64decode(cookies_b64))
-            os.chmod(tmp_path_from_b64, 0o600)
-            log.info("Decoded cookies from secrets into: %s", tmp_path_from_b64)
-            orig_cookies_file = tmp_path_from_b64
-            temp_paths_to_cleanup.append(tmp_path_from_b64)
+            os.chmod(tmp_path, 0o600)
+            temp_paths_to_cleanup.append(tmp_path)
+            orig_cookies_file = tmp_path
+            log.info("Decoded cookies from secrets into: %s", tmp_path)
         except Exception as e:
             log.warning("Failed to decode YTDLP_COOKIES_B64: %s", e)
 
-    # Copy cookies file to a writable temp file for yt-dlp
-    temp_cookies_file: Optional[str] = None
+    # If cookies path present, copy to temp (and normalize encoding)
     if orig_cookies_file:
         try:
             fd, tmp_copy = tempfile.mkstemp(suffix=".cookies.txt")
             os.close(fd)
             shutil.copyfile(orig_cookies_file, tmp_copy)
             os.chmod(tmp_copy, 0o600)
-            log.info("Using temp cookies file at: %s", tmp_copy)
-            temp_cookies_file = _ensure_utf8_netscape(tmp_copy, temp_paths_to_cleanup)
             temp_paths_to_cleanup.append(tmp_copy)
+            temp_cookies_file = _ensure_utf8_netscape(tmp_copy, temp_paths_to_cleanup)
+            log.info("Using temp cookies file at: %s", temp_cookies_file)
         except Exception as e:
             log.warning("Could not create temp cookies file from '%s': %s. Continuing without cookies.", orig_cookies_file, e)
             temp_cookies_file = None
@@ -615,12 +611,8 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
             except Exception:
                 pass
 
-    # --- Metadata (no download) ---
-    ydl_opts: Dict[str, Any] = {
-        'quiet': True,
-        'no_warnings': True,
-        'extract_flat': False,
-    }
+    # --- Metadata extraction (best-effort; never crashes the flow) ---
+    ydl_opts: Dict[str, Any] = {'quiet': True, 'no_warnings': True, 'extract_flat': False}
     if temp_cookies_file:
         ydl_opts['cookiefile'] = temp_cookies_file
     elif cookies_from_browser:
@@ -642,7 +634,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                 'view_count': info_dict.get('view_count'),
                 'thumbnail': info_dict.get('thumbnail'),
             }
-    except yt_dlp.utils.DownloadError as e:
+    except Exception as e:
         log.warning("yt-dlp metadata extraction failed for %s: %s. Using default metadata.", url, e)
         metadata = {
             'title': 'Unknown Title',
@@ -653,25 +645,11 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
             'extractor': 'unknown',
             'view_count': None,
             'thumbnail': None,
+            'type_input': type_input,
         }
-    except Exception as e:
-        log.error("Unexpected error during metadata extraction for %s: %s", url, e, exc_info=True)
-        _cleanup_temp_cookies()
-        return None
 
-    # --- Build command attempts ---
-    base_cmd = [
-        YT_DLP_PATH, url,
-        "-x",
-        "--audio-format", Config.AUDIO_FORMAT,
-        "--no-playlist", "--no-write-info-json",
-        "--progress", "--no-simulate", "--no-abort-on-error",
-        "--restrict-filenames",
-        "-o", str(output_path_template),
-        "--force-ipv4",
-    ]
-
-    enrich: List[str] = []
+    # --- Build base yt-dlp command once ---
+    enrich: list[str] = []
     if user_agent:
         enrich += [
             "--user-agent", user_agent,
@@ -680,69 +658,74 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         ]
     if getattr(Config, "YTDLP_GEO_BYPASS", True):
         enrich += ["--geo-bypass", "--geo-bypass-country", getattr(Config, "YTDLP_GEO_COUNTRY", "US")]
-
     if temp_cookies_file:
         enrich += ["--cookies", temp_cookies_file]
     elif cookies_from_browser:
         enrich += ["--cookies-from-browser", cookies_from_browser]
 
-    attempts: List[Tuple[str, List[str]]] = []
-    attempts.append(("primary", base_cmd + enrich))
-    attempts.append(("tv_embedded", base_cmd + enrich + ["--extractor-args", "youtube:player_client=tv_embedded"]))
-    attempts.append(("web_forced", base_cmd + enrich + ["--extractor-args", "youtube:webpage_download_web=1"]))
-
-    fmt_ladder = "251/140/bestaudio/best"
-    ba_cmd = [
+    base_cmd = [
         YT_DLP_PATH, url,
-        "-f", fmt_ladder,
+        "-x", "--audio-format", Config.AUDIO_FORMAT,
         "--no-playlist", "--no-write-info-json",
         "--progress", "--no-simulate", "--no-abort-on-error",
         "--restrict-filenames",
-        "-o", str(output_path_template),
+        "-o", output_path_template,
         "--force-ipv4",
     ] + enrich
-    attempts.append(("bestaudio_ladder", ba_cmd))
+
+    attempts: list[tuple[str, list[str]]] = [
+        ("primary", base_cmd),
+        ("tv_embedded", base_cmd + ["--extractor-args", "youtube:player_client=tv_embedded"]),
+        ("web_forced", base_cmd + ["--extractor-args", "youtube:webpage_download_web=1"]),
+        ("bestaudio_ladder",
+            [YT_DLP_PATH, url, "-f", "251/140/bestaudio/best",
+             "--no-playlist", "--no-write-info-json", "--progress", "--no-simulate",
+             "--no-abort-on-error", "--restrict-filenames", "-o", output_path_template,
+             "--force-ipv4"] + enrich),
+    ]
 
     log.info("Attempting to download audio from: %s", url)
 
+    # Track if we’ve already tried Apify (to avoid spamming)
+    apify_tried = False
     last_err: Optional[Exception] = None
-    retries = int(getattr(Config, "YTDLP_RETRIES", 2))
 
     try:
-        for label, cmd in attempts[: 1 + retries + 3]:
-            log.debug("[yt-dlp] Attempt '%s': %s", label, " ".join(cmd))
+        for label, cmd in attempts:
+            # Prepare defaults so we never reference unbound locals
+            cp = None
             try:
-                result = subprocess.run(
-                    cmd, check=True, capture_output=True, text=True, encoding='utf-8'
-                )
-                if result.stdout:
-                    log.info("yt-dlp stdout:\n%s", result.stdout)
-                if result.stderr:
-                    log.warning("yt-dlp stderr:\n%s", result.stderr)
+                log.debug("[yt-dlp] Attempt '%s': %s", label, " ".join(cmd))
+                cp = subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
+                if cp.stdout:
+                    log.info("yt-dlp stdout:\n%s", cp.stdout)
+                if cp.stderr:
+                    log.debug("yt-dlp stderr:\n%s", cp.stderr)
 
-                # Success case 1: final mp3 exists
+                # Success case 1: expected mp3 exists
                 if final_audio_path.exists():
                     log.info("Success (%s) → %s", label, final_audio_path)
+                    _cleanup_temp_cookies()
                     return (str(final_audio_path), {**metadata, "download_attempt": label})
 
-                # Success case 2: another audio exists; convert if needed
-                audio_candidates = sorted(
-                    output_dir.glob(f"{base_filename}.*"),
-                    key=lambda p: p.stat().st_mtime,
-                    reverse=True
-                )
-                for cand in audio_candidates:
+                # Success case 2: any audio; convert if needed
+                for cand in sorted(output_dir.glob(f"{base_filename}.*"),
+                                   key=lambda p: p.stat().st_mtime, reverse=True):
                     if cand.suffix.lower() in [".mp3", ".m4a", ".webm", ".opus", ".ogg", ".wav"]:
                         if cand.suffix.lower() == ".mp3":
                             log.info("Success (%s) → %s", label, cand)
+                            _cleanup_temp_cookies()
                             return (str(cand), {**metadata, "download_attempt": label})
+                        # convert
                         out = _ensure_mp3(cand, final_audio_path)
                         if out:
                             log.info("Success (%s) + convert → %s", label, out)
+                            _cleanup_temp_cookies()
                             return (out, {**metadata, "download_attempt": label})
 
                 log.error("Attempt '%s' completed but no usable audio file was produced.", label)
                 last_err = RuntimeError("yt-dlp completed without producing expected output.")
+
             except subprocess.CalledProcessError as e:
                 stderr = e.stderr or ""
                 log.error("yt-dlp failed (Exit %s) on attempt '%s'. URL: %s", e.returncode, label, url)
@@ -750,46 +733,46 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                 if stderr:
                     log.error("Stderr:\n%s", stderr)
                 last_err = e
+
+                # EARLY APIFY: if first time we detect region-lock, jump to Apify immediately
+                if not apify_tried and _is_region_lock(stderr):
+                    apify_tried = True
+                    log.info("Detected region lock on attempt '%s'. Trying Apify fallback immediately…", label)
+                    ap = _apify_download_audio(url, output_dir, base_filename)
+                    if ap:
+                        _cleanup_temp_cookies()
+                        # merge any basic metadata we had
+                        ap_path, ap_meta = ap
+                        return (ap_path, {**metadata, **ap_meta})
+                    else:
+                        log.error("Apify fallback failed; continuing ladder.")
+
                 continue
+
             except FileNotFoundError:
                 log.error("'%s' not found. Is yt-dlp installed and in PATH?", YT_DLP_PATH)
-                return None
+                last_err = FileNotFoundError("yt-dlp not found")
+                break
+
             except Exception as e:
                 log.error("Unexpected error during download (attempt '%s'): %s", label, e, exc_info=True)
                 last_err = e
                 continue
+
     finally:
         _cleanup_temp_cookies()
 
-    # All yt-dlp attempts failed → try Apify
+    # If we got here, yt-dlp ladder failed and either Apify never triggered or failed
     log.error("All yt-dlp attempts failed.")
-    apify_result = _apify_download_audio(url, output_dir, base_filename)
-    if result:
-        return result
-    return None
-    
+    if not apify_tried:
+        log.info("Trying Apify fallback at end…")
+        ap = _apify_download_audio(url, output_dir, base_filename)
+        if ap:
+            ap_path, ap_meta = ap
+            return (ap_path, {**metadata, **ap_meta})
+
     if last_err:
-        err_text = f"{last_err}"
-        log.error("Last error: %s", err_text)
-
-        # Region-lock heuristic → second Apify path
-        geo_msgs = [
-            "The uploader has not made this video available in your country",
-            "This video is not available in your country",
-            "is not available in your country",
-        ]
-        if any(m in err_text for m in geo_msgs):
-            log.info("Detected region lock. Trying Apify fallback…")
-            ap = _apify_ytdl_fallback(
-                url=url,
-                output_dir=output_dir,
-                base_filename=base_filename,
-                audio_format=Config.AUDIO_FORMAT,
-                ffmpeg_path=FFMPEG_PATH,
-            )
-            if ap:
-                return ap
-
+        log.error("Last error: %s", last_err)
     return None
 
 
