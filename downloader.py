@@ -20,6 +20,7 @@ import urllib.request
 import json
 import requests
 
+log = logging.getLogger(__name__)
 
 
 logging.info(
@@ -34,6 +35,70 @@ try:
 except ImportError:
     print("ERROR: 'yt-dlp' library not found. Install using: pip install yt-dlp", file=sys.stderr)
     sys.exit(1)
+
+def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> tuple[str, dict] | None:
+    token = os.getenv("APIFY_TOKEN", "")
+    timeout_ms = int(os.getenv("APIFY_TIMEOUT_MS", "180000"))
+    if not token:
+        log.warning("APIFY_TOKEN not set; skipping Apify fallback.")
+        return None
+
+    endpoint = (
+        "https://api.apify.com/v2/acts/streamers~youtube-video-downloader/"
+        "run-sync-get-dataset-items?token=" + token
+    )
+
+    payload = {
+        # minimal inputs for the actor; see Apify docs for more options
+        "videoUrl": url,
+        "convertToAudio": True,
+        "audioFormat": "mp3"
+    }
+
+    try:
+        log.info("Apify fallback: requesting actor run for %s", url)
+        resp = requests.post(endpoint, json=payload, timeout=timeout_ms/1000)
+        resp.raise_for_status()
+        items = resp.json() if resp.content else []
+        if not isinstance(items, list) or not items:
+            log.error("Apify returned no items.")
+            return None
+
+        # The actor usually returns a downloadable URL in `audio` or inside `downloads.audio`
+        audio_url = None
+        it = items[0]
+        audio_url = (
+            it.get("audio")
+            or (it.get("downloads") or {}).get("audio")
+            or it.get("url")  # last-ditch if they returned direct MP3 url as 'url'
+        )
+
+        if not audio_url:
+            log.error("Apify response missing audio URL: %s", json.dumps(it)[:500])
+            return None
+
+        out_path = output_dir / f"{base_filename}.mp3"
+        with requests.get(audio_url, stream=True, timeout=timeout_ms/1000) as r:
+            r.raise_for_status()
+            with open(out_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1024 * 256):
+                    if chunk:
+                        f.write(chunk)
+
+        if out_path.exists() and out_path.stat().st_size > 0:
+            log.info("Apify fallback success → %s", out_path)
+            meta = {"extractor": "apify", "webpage_url": url, "download_attempt": "apify_fallback"}
+            return str(out_path), meta
+
+        log.error("Apify fallback produced no file.")
+        return None
+
+    except requests.HTTPError as e:
+        log.error("Apify HTTP error: %s %s", e.response.status_code if e.response else "?", e)
+    except Exception as e:
+        log.error("Apify fallback failed: %s", e, exc_info=True)
+    return None
+
 
 def _apify_ytdl_fallback(
     url: str,
@@ -580,6 +645,11 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         _cleanup_temp_cookies()
 
     log.error("All yt-dlp attempts failed.")
+    # After your yt-dlp ladder fails:
+    apify_result = _apify_download_audio(url, output_dir, base_filename)
+    if apify_result:
+        return apify_result
+        
     if last_err:
         err_text = f"{last_err}"
         log.error("Last error: %s", err_text)
@@ -603,6 +673,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                 return ap
                 
     return None
+
 
 
 
