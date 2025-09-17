@@ -174,17 +174,6 @@ def _ensure_mp3(path_in: Path, path_out: Path) -> Optional[str]:
 # --- Apify fallbacks ---
 import time
 
-# --- Region-lock detector (keep near top of file) ---
-def _is_region_lock(text: str) -> bool:
-    if not text:
-        return False
-    needles = [
-        "The uploader has not made this video available in your country",
-        "This video is not available in your country",
-        "is not available in your country",
-    ]
-    return any(n in text for n in needles)
-
 # --- Small HTTP downloader used by Apify fallback -----------------------------
 def _apify_http_download(src_url: str, dst_path: Path) -> bool:
     import requests
@@ -200,184 +189,164 @@ def _apify_http_download(src_url: str, dst_path: Path) -> bool:
         log.error("Apify download failed: %s", e)
         return False
 
-# --- Apify fallback (robust: run -> poll -> dataset; disables uploaders) ---
 # --- Robust Apify fallback (run -> poll dataset; then run-sync fallback) ------
-def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Optional[Tuple[str, Dict[str, Any]]]:
+def _is_region_lock(msg: str) -> bool:
+    if not msg:
+        return False
+    needles = [
+        "not made this video available in your country",
+        "video is not available in your country",
+        "playback on other websites has been disabled",
+        "Playback on other websites has been disabled",
+    ]
+    m = msg.lower()
+    return any(n in m for n in needles)
+
+
+def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> tuple[str, dict] | None:
     """
-    Uses Apify actor 'streamers/youtube-video-downloader' to fetch audio when yt-dlp
-    is region-locked. Explicitly disables uploaders (GCS/S3/Azure) so credentials
-    are not required. Returns (audio_path, metadata) or None.
+    Use Apify 'streamers/youtube-video-downloader' with proxy + GCS uploader.
+    Returns (audio_path, metadata) or None.
     """
-    import time, json, requests, subprocess
+    import time
+    import json as _json
+    import requests
 
     token = os.getenv("APIFY_TOKEN", getattr(Config, "APIFY_TOKEN", "")).strip()
     if not token:
         log.warning("APIFY_TOKEN not set; skipping Apify fallback.")
         return None
 
-    base = "https://api.apify.com/v2"
-    actor = "streamers~youtube-video-downloader"
+    act_id = os.getenv("APIFY_ACT_ID", getattr(Config, "APIFY_ACT_ID", "streamers~youtube-video-downloader")).strip()
 
-    # total time budget for this fallback
-    timeout_total_s = int(os.getenv("APIFY_TIMEOUT_MS", getattr(Config, "APIFY_TIMEOUT_MS", 180_000))) / 1000
-    must_finish_by = time.time() + timeout_total_s
+    # Proxy (by country)
+    proxy_country = os.getenv("APIFY_PROXY_COUNTRY", getattr(Config, "APIFY_PROXY_COUNTRY", "US")).strip()
+    proxy_cfg = {"useApifyProxy": True, "apifyProxyCountry": proxy_country} if proxy_country else {"useApifyProxy": True}
 
-    # Prefer Apify Proxy (country can be US or PR)
-    proxy_cfg = {"useApifyProxy": True, "apifyProxyCountry": os.getenv("APIFY_PROXY_COUNTRY", "US")}
+    # Uploader → GCS
+    upload_to = os.getenv("APIFY_UPLOAD_TO", getattr(Config, "APIFY_UPLOAD_TO", "gcs")).strip().lower()
+    gcs_bucket = os.getenv("APIFY_GCS_BUCKET", getattr(Config, "APIFY_GCS_BUCKET", "")).strip()
+    gcs_sa_json = os.getenv("APIFY_GCS_SERVICE_JSON", getattr(Config, "APIFY_GCS_SERVICE_JSON", "")).strip()
 
-    # Hard-disable uploaders to avoid "Could not initialize any uploader…" errors
-    payload = {
-        "videos": [{"url": url}],      # ← required by current actor schema
+    payload: dict[str, Any] = {
+        # IMPORTANT: this actor expects 'videos' (not videoUrl/videoUrls)
+        "videos": [{"url": url}],
         "convertToAudio": True,
         "audioFormat": "mp3",
         "proxy": proxy_cfg,
-        "uploader": {"type": "none", "enabled": False},
-        "uploadTo": "none",
-        "gcs": {"enabled": False},
-        "s3": {"enabled": False},
-        "azure": {"enabled": False},
     }
 
-    # Helper to construct metadata from Apify item
-    def _meta_from_item(item: Dict[str, Any], run_id: Optional[str]) -> Dict[str, Any]:
-        return {
-            "title": item.get("title") or "Unknown Title",
-            "uploader": item.get("uploader") or item.get("channel") or "Unknown Uploader",
-            "duration": item.get("duration"),
-            "webpage_url": url,
-            "extractor": "apify-streamers/youtube-video-downloader",
-            "download_attempt": "apify_fallback",
-            "apify_run_id": run_id,
-            "thumbnail": item.get("thumbnail"),
-            "view_count": item.get("viewCount"),
+    # If GCS creds are present, enable uploader
+    if upload_to == "gcs" and gcs_bucket and gcs_sa_json:
+        payload["uploadTo"] = "gcs"
+        payload["uploader"] = "gcs"            # some builds require this, harmless otherwise
+        payload["gcs"] = {
+            "bucket": gcs_bucket,
+            "serviceAccountJson": gcs_sa_json, # pass as string; actor parses JSON internally
+            # optional prefix inside the bucket
+            "path": f"apify/{base_filename}/"
         }
 
-    # 1) Start run and poll its dataset
+    # Try 1: run-sync-get-dataset-items (returns items directly)
+    run_sync_items = f"https://api.apify.com/v2/acts/{act_id}/run-sync-get-dataset-items?token={token}"
     try:
-        if time.time() >= must_finish_by:
-            log.error("Apify fallback timed out before run start.")
-            return None
-
-        log.info("Apify fallback: start run (payload keys=%s)", list(payload.keys()))
-        start = requests.post(f"{base}/acts/{actor}/runs?token={token}", json=payload, timeout=(10, 20))
-        if start.status_code == 201:
-            run = (start.json().get("data") or {})
-            run_id = run.get("id")
-
-            if run_id:
-                while time.time() < must_finish_by:
-                    r = requests.get(f"{base}/actor-runs/{run_id}?token={token}", timeout=10)
-                    if r.status_code != 200:
-                        log.error("Apify poll HTTP %s. Body: %s", r.status_code, r.text[:1000])
-                        break
-                    data = r.json().get("data") or {}
-                    status = (data.get("status") or "").upper()
-
-                    if status in ("SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"):
-                        if status != "SUCCEEDED":
-                            msg = data.get("statusMessage") or data.get("message") or "Run did not succeed."
-                            log.error("Apify run %s: %s", status, msg)
-
-                        dsid = data.get("defaultDatasetId")
-                        if not dsid:
-                            break
-
-                        items_resp = requests.get(
-                            f"{base}/datasets/{dsid}/items?token={token}&format=json", timeout=20
-                        )
-                        if items_resp.status_code != 200:
-                            log.error("Apify items HTTP %s. Body: %s", items_resp.status_code, items_resp.text[:1000])
-                            break
-
-                        items = items_resp.json()
-                        if not isinstance(items, list) or not items:
-                            log.error("Apify: dataset returned no items.")
-                            break
-
-                        it = items[0]
-                        audio_url = it.get("audio") or (it.get("downloads") or {}).get("audio") or it.get("audioUrl")
-                        video_url = it.get("video") or (it.get("downloads") or {}).get("video") or it.get("url")
-
-                        out_mp3 = output_dir / f"{base_filename}.mp3"
-                        tmp_in = output_dir / f"{base_filename}.apify.tmp"
-
-                        if audio_url:
-                            log.info("Apify: downloading direct audio…")
-                            if _apify_http_download(audio_url, out_mp3) and out_mp3.exists() and out_mp3.stat().st_size > 0:
-                                meta = _meta_from_item(it, run_id)
-                                log.info("Apify fallback success → %s", out_mp3)
-                                return str(out_mp3), meta
-                            log.error("Apify: audio file empty or missing after download.")
-                            break
-
-                        if video_url:
-                            log.info("Apify: downloading video then extracting audio…")
-                            if _apify_http_download(video_url, tmp_in):
-                                conv = subprocess.run(
-                                    [FFMPEG_PATH, "-y", "-i", str(tmp_in), "-vn",
-                                     "-acodec", "libmp3lame", "-q:a", "2", str(out_mp3)],
-                                    check=False, capture_output=True, text=True, encoding="utf-8"
-                                )
-                                try:
-                                    tmp_in.unlink(missing_ok=True)
-                                except Exception:
-                                    pass
-
-                                if conv.returncode == 0 and out_mp3.exists() and out_mp3.stat().st_size > 0:
-                                    meta = _meta_from_item(it, run_id)
-                                    log.info("Apify fallback success → %s", out_mp3)
-                                    return str(out_mp3), meta
-
-                                log.error("Apify: ffmpeg failed to extract audio. stderr:\n%s", conv.stderr)
-                            break
-
-                        log.error("Apify: no downloadable audio/video URLs in dataset item.")
-                        break
-
-                    time.sleep(2.0)
-        else:
-            log.error("Apify start HTTP %s. Body: %s", start.status_code, start.text[:2000])
-
-    except requests.RequestException as e:
-        log.error("Apify network error: %s", e)
-    except Exception as e:
-        log.error("Apify unexpected error: %s", e, exc_info=True)
-
-    # 2) Fallback to run-sync endpoint if the run/poll path didn’t succeed
-    try:
-        endpoint = f"{base}/acts/{actor}/run-sync-get-dataset-items?token={token}"
         log.info("Apify fallback: run-sync (payload keys=%s)", list(payload.keys()))
-        resp = requests.post(endpoint, json=payload, timeout=(30, max(60, timeout_total_s)))
-        if resp.status_code != 200:
-            log.error("Apify run-sync HTTP %s. Body: %s", resp.status_code, resp.text[:2000])
-            return None
-
-        items = resp.json() if resp.content else []
-        if isinstance(items, dict):
-            items = [items]
-        if not isinstance(items, list) or not items:
-            log.error("Apify run-sync: no items returned.")
-            return None
-
-        it = items[0]
-        audio_url = it.get("audio") or (it.get("downloads") or {}).get("audio") or it.get("audioUrl")
-        out_mp3 = output_dir / f"{base_filename}.mp3"
-
-        if audio_url and _apify_http_download(audio_url, out_mp3) and out_mp3.stat().st_size > 0:
-            meta = _meta_from_item(it, run_id=None)
-            log.info("Apify run-sync fallback success → %s", out_mp3)
-            return str(out_mp3), meta
-
-        log.error("Apify run-sync: no audio URL or download failed.")
-        return None
-
-    except requests.RequestException as e:
-        log.error("Apify run-sync network error: %s", e)
+        r = requests.post(run_sync_items, json=payload, timeout=(30, 240))
+        if r.status_code == 200:
+            items = r.json() if r.content else []
+            if isinstance(items, dict):
+                items = [items]
+            if items:
+                item = items[0]
+                audio_url = (
+                    (item.get("downloads") or {}).get("audio")
+                    or item.get("audio")
+                    or item.get("audioUrl")
+                    or item.get("url")
+                )
+                if audio_url:
+                    # Download to local file
+                    out_path = output_dir / f"{base_filename}.mp3"
+                    with requests.get(audio_url, stream=True, timeout=(15, 180)) as rr:
+                        rr.raise_for_status()
+                        with open(out_path, "wb") as f:
+                            for chunk in rr.iter_content(1024 * 256):
+                                if chunk:
+                                    f.write(chunk)
+                    if out_path.exists() and out_path.stat().st_size > 0:
+                        meta = {"extractor": "apify", "webpage_url": url, "download_attempt": "apify_fallback"}
+                        log.info("Apify fallback success → %s", out_path)
+                        return str(out_path), meta
+                else:
+                    log.error("Apify: dataset returned no direct audio URL; item keys: %s", list(item.keys()))
+            else:
+                log.error("Apify: dataset returned no items.")
+        else:
+            log.error("Apify run-sync HTTP %s. Body: %s", r.status_code, r.text[:2000])
     except Exception as e:
-        log.error("Apify run-sync unexpected error: %s", e, exc_info=True)
+        log.error("Apify run-sync failed: %s", e)
+
+    # Try 2: start run, then poll dataset for items
+    start_url = f"https://api.apify.com/v2/acts/{act_id}/runs?token={token}"
+    try:
+        log.info("Apify fallback: start run (payload keys=%s)", list(payload.keys()))
+        r = requests.post(start_url, json=payload, timeout=(30, 60))
+        if r.status_code not in (200, 201):
+            log.error("Apify start HTTP %s. Body: %s", r.status_code, r.text[:2000])
+            return None
+        run = r.json()
+        ds_id = run.get("data", {}).get("defaultDatasetId") or run.get("defaultDatasetId")
+        run_id = run.get("data", {}).get("id") or run.get("id")
+
+        if not ds_id:
+            log.error("Apify run started but defaultDatasetId missing. Run: %s", _json.dumps(run)[:800])
+            return None
+
+        # poll dataset
+        items_url = f"https://api.apify.com/v2/datasets/{ds_id}/items?limit=1"
+        for _ in range(30):  # ~30 * 2s = 60s max
+            time.sleep(2)
+            rr = requests.get(items_url, timeout=20)
+            if rr.status_code != 200:
+                continue
+            items = rr.json() if rr.content else []
+            if isinstance(items, dict):
+                items = [items]
+            if items:
+                item = items[0]
+                audio_url = (
+                    (item.get("downloads") or {}).get("audio")
+                    or item.get("audio")
+                    or item.get("audioUrl")
+                    or item.get("url")
+                )
+                if audio_url:
+                    out_path = output_dir / f"{base_filename}.mp3"
+                    with requests.get(audio_url, stream=True, timeout=(15, 180)) as ar:
+                        ar.raise_for_status()
+                        with open(out_path, "wb") as f:
+                            for chunk in ar.iter_content(1024 * 256):
+                                if chunk:
+                                    f.write(chunk)
+                    if out_path.exists() and out_path.stat().st_size > 0:
+                        meta = {
+                            "extractor": "apify",
+                            "webpage_url": url,
+                            "download_attempt": "apify_fallback",
+                            "apify_run_id": run_id,
+                        }
+                        log.info("Apify fallback success (polled) → %s", out_path)
+                        return str(out_path), meta
+                else:
+                    # If you want, inspect for GCS-only outputs:
+                    # e.g. item.get("gcsUrl") or item.get("gcsPath")
+                    log.error("Apify: item present but no direct audio URL; keys: %s", list(item.keys()))
+                    return None
+        log.error("Apify: dataset never produced items in time (ds_id=%s).", ds_id)
+    except Exception as e:
+        log.error("Apify start/poll failed: %s", e)
 
     return None
-
 
 
 
@@ -777,6 +746,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
 
 
 
