@@ -207,110 +207,110 @@ if not FFMPEG_PATH:
 # --- Core Function ---
 def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -> Optional[Tuple[str, Dict[str, Any]]]:
     """
-    Downloads audio from a given URL using the yt-dlp command-line tool.
-
-    This function first attempts to extract video metadata using the yt-dlp
-    library and then executes the yt-dlp CLI to download and convert the
-    audio to the format specified in the configuration. It handles potential
-    errors during both metadata extraction and the download process.
-
-    Args:
-        url: The URL of the video or audio source (e.g., YouTube, Vimeo).
-        output_dir: The directory where the downloaded audio file should be saved.
-                    The directory will be created if it does not exist.
-        base_filename: The base name for the output audio file (without the file extension).
-
-    Returns:
-        A tuple containing the full path to the downloaded audio file (as a string)
-        and a dictionary containing standardized metadata if the download is
-        successful. Returns None if the download or metadata extraction fails
-        after handling errors.
+    Downloads audio from a given URL using yt-dlp with resilient fallbacks.
+    Immediately triggers Apify fallback on first region-lock error.
     """
-    # --- ALWAYS define these first ---
+    import base64
+
+    enrich: list[str] = []
+
+    # --- Proxy first (so it survives later additions) ---
     proxy_url = os.getenv("YTDLP_PROXY_URL", "").strip()
     if not proxy_url:
         ap_pw = os.getenv("APIFY_PROXY_PASSWORD", "").strip()
         ap_cty = os.getenv("APIFY_PROXY_COUNTRY", "US").strip()
         if ap_pw:
             proxy_url = f"http://auto:{ap_pw}@proxy.apify.com:8000/?country={ap_cty}"
+    if proxy_url:
+        enrich += ["--proxy", proxy_url]
 
-    # UA / cookies envs
-    user_agent = os.getenv("YTDLP_USER_AGENT", getattr(Config, "YTDLP_USER_AGENT", "")).strip()
-    cookies_from_browser = os.getenv(
-        "YTDLP_COOKIES_FROM_BROWSER",
-        getattr(Config, "YTDLP_COOKIES_FROM_BROWSER", "") if hasattr(Config, "YTDLP_COOKIES_FROM_BROWSER") else ""
-    ).strip()
-    orig_cookies_file = os.getenv("YTDLP_COOKIES_FILE", getattr(Config, "YTDLP_COOKIES_FILE", "")).strip()
-    cookies_b64 = os.getenv(
-        "YTDLP_COOKIES_B64",
-        getattr(Config, "YTDLP_COOKIES_B64", "") if hasattr(Config, "YTDLP_COOKIES_B64") else ""
-    ).strip()
-
-    # materialize cookie file (this also sets temp_cookies_file)
-    temp_paths_to_cleanup: list[str] = []
-    temp_cookies_file: Optional[str] = None
-    
-    # >>> EARLY NON-YOUTUBE BRANCH <<<
-    if not _looks_like_youtube(url):
-        # use generic path with sane timeout; no YT-only flags
-        return _download_non_youtube(
-            url,
-            output_dir,
-            base_filename,
-            user_agent=user_agent,
-            cookies_file=temp_cookies_file,
-            cookies_from_browser=cookies_from_browser,
-            proxy_url=proxy_url,
-            metadata=metadata,
-        )
-    # Check if yt-dlp executable was found during initial checks
+    # --- Sanity: yt-dlp + ffmpeg present? ---
     if not YT_DLP_PATH:
-         logging.error("yt-dlp executable not found. Cannot download.")
-         return None
+        log.error("yt-dlp executable not found. Cannot download.")
+        return None
+    if not FFMPEG_PATH:
+        log.error("ffmpeg not found in PATH. Cannot convert audio.")
+        return None
 
-    # Define output paths using the base filename and configured audio format
-    output_path_template = output_dir / f"{base_filename}.%(ext)s"
-    final_audio_path = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
-
-    # Ensure the output directory exists, creating it if necessary
+    # --- Ensure output dir exists ---
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        logging.error(f"Failed to create output directory {output_dir}: {e}")
+        log.error("Failed to create output directory %s: %s", output_dir, e)
         return None
 
-    # --- Metadata Extraction ---
-    # Extract metadata using the yt-dlp library without downloading the video.
-    # This allows us to get information even if the download later fails.
-    ydl_opts = {
-        'quiet': True,          # Suppress console output from yt-dlp library
-        'no_warnings': True,    # Hide warnings from yt-dlp library
-        'extract_flat': False,  # Ensure full metadata is extracted
-    }
-    # Metadata extraction strategy:
-    # - Attempt to extract comprehensive metadata first.
-    # - If extraction fails (e.g., due to geo-restrictions, private video),
-    #   fall back to a minimal metadata dictionary.
-    # - Always include the original URL as a fallback for webpage_url.
+    # Paths & filenames
+    output_path_template = str(output_dir / f"{base_filename}.%(ext)s")
+    final_audio_path = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
+
+    # --- Cookies (file, b64, browser) → temp file (writable) ---
+    temp_paths_to_cleanup: list[str] = []
+    temp_cookies_file: Optional[str] = None
+
+    orig_cookies_file = os.getenv("YTDLP_COOKIES_FILE", getattr(Config, "YTDLP_COOKIES_FILE", "")).strip()
+    cookies_b64 = os.getenv("YTDLP_COOKIES_B64", getattr(Config, "YTDLP_COOKIES_B64", "") if hasattr(Config, "YTDLP_COOKIES_B64") else "").strip()
+    cookies_from_browser = os.getenv("YTDLP_COOKIES_FROM_BROWSER", getattr(Config, "YTDLP_COOKIES_FROM_BROWSER", "") if hasattr(Config, "YTDLP_COOKIES_FROM_BROWSER") else "").strip()
+    user_agent = os.getenv("YTDLP_USER_AGENT", getattr(Config, "YTDLP_USER_AGENT", "")).strip()
+
+    if cookies_b64:
+        try:
+            fd, tmp_path = tempfile.mkstemp(suffix=".cookies.txt")
+            os.close(fd)
+            with open(tmp_path, "wb") as f:
+                f.write(base64.b64decode(cookies_b64))
+            os.chmod(tmp_path, 0o600)
+            temp_paths_to_cleanup.append(tmp_path)
+            orig_cookies_file = tmp_path
+            log.info("Decoded cookies from secrets into: %s", tmp_path)
+        except Exception as e:
+            log.warning("Failed to decode YTDLP_COOKIES_B64: %s", e)
+
+    if orig_cookies_file:
+        try:
+            fd, tmp_copy = tempfile.mkstemp(suffix=".cookies.txt")
+            os.close(fd)
+            shutil.copyfile(orig_cookies_file, tmp_copy)
+            os.chmod(tmp_copy, 0o600)
+            temp_paths_to_cleanup.append(tmp_copy)
+            temp_cookies_file = _ensure_utf8_netscape(tmp_copy, temp_paths_to_cleanup)
+            log.info("Using temp cookies file at: %s", temp_cookies_file)
+        except Exception as e:
+            log.warning("Could not create temp cookies file from '%s': %s. Continuing without cookies.", orig_cookies_file, e)
+            temp_cookies_file = None
+
+    def _cleanup_temp_cookies():
+        for p in temp_paths_to_cleanup:
+            try:
+                os.remove(p)
+                log.info("Removed temp cookies file: %s", p)
+            except Exception:
+                pass
+
+    # --- Metadata extraction (best-effort; define BEFORE branching) ---
+    ydl_opts: Dict[str, Any] = {'quiet': True, 'no_warnings': True, 'extract_flat': False}
+    if temp_cookies_file:
+        ydl_opts['cookiefile'] = temp_cookies_file
+    elif cookies_from_browser:
+        ydl_opts['cookiesfrombrowser'] = cookies_from_browser
+    if user_agent:
+        ydl_opts['user_agent'] = user_agent
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(url, download=False)
-            # Standardize metadata keys for consistent access
             metadata = {
                 'title': info_dict.get('title', 'Unknown Title'),
                 'uploader': info_dict.get('uploader') or info_dict.get('channel') or info_dict.get('uploader_id') or 'Unknown Uploader',
-                'upload_date': info_dict.get('upload_date'),  # YYYYMMDD format or None
-                'webpage_url': info_dict.get('webpage_url', url),  # Use canonical URL if available, else original URL
-                'duration': info_dict.get('duration'), # Duration in seconds or None
-                'extractor': info_dict.get('extractor_key', info_dict.get('extractor', 'unknown')), # Platform identifier
+                'upload_date': info_dict.get('upload_date'),
+                'webpage_url': info_dict.get('webpage_url', url),
+                'duration': info_dict.get('duration'),
+                'extractor': info_dict.get('extractor_key', info_dict.get('extractor', 'unknown')),
                 'type_input': type_input,
-                # Include additional potentially useful fields
                 'view_count': info_dict.get('view_count'),
                 'thumbnail': info_dict.get('thumbnail'),
             }
-    except yt_dlp.utils.DownloadError as e:
-        # Log a warning if metadata extraction fails and use default values
-        logging.warning(f"yt-dlp metadata extraction failed for {url}: {e}. Using default metadata.")
+    except Exception as e:
+        log.warning("yt-dlp metadata extraction failed for %s: %s. Using default metadata.", url, e)
         metadata = {
             'title': 'Unknown Title',
             'uploader': 'Unknown Uploader',
@@ -320,95 +320,139 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
             'extractor': 'unknown',
             'view_count': None,
             'thumbnail': None,
+            'type_input': type_input,
         }
-    except Exception as e:
-        # Catch any other unexpected errors during metadata extraction
-        logging.error(f"An unexpected error occurred during metadata extraction for {url}: {e}", exc_info=True)
-        return None
 
-    # --- Download Command Construction ---
-    # Construct the command to execute yt-dlp via subprocess.
-    # Key options used:
-    # -x (--extract-audio): Extract the audio stream.
-    # --audio-format: Specify the desired output audio format (e.g., mp3). Requires ffmpeg.
-    # --no-playlist: Prevent accidental download of entire playlists.
-    # --progress: Display download progress in the console output.
-    # --no-write-info-json: Avoid creating a separate JSON file for metadata (we already extracted it).
-    # --no-simulate: Ensure the actual download happens.
-    # --no-abort-on-error: Attempt to continue if parts of the download fail.
-    # -o (--output): Define the output filename template.
-    cmd = [
-        YT_DLP_PATH,
-        url,
-        "-x",  # Extract audio only
-        "--audio-format", Config.AUDIO_FORMAT,  # Convert to specified format (requires ffmpeg)
-        "--no-playlist",       # Avoid downloading entire playlists
-        "--no-write-info-json", # Skip writing metadata JSON file
-        "--progress",          # Show download progress
-        "--no-simulate",       # Actually download (no dry run)
-        "--no-abort-on-error", # Continue if parts fail
-        "-o", str(output_path_template), # Output filename template
+    # >>> EARLY NON-YOUTUBE BRANCH (metadata already exists) <<<
+    if not _looks_like_youtube(url):
+        res = _download_non_youtube(
+            url,
+            output_dir,
+            base_filename,
+            user_agent=user_agent,
+            cookies_file=temp_cookies_file,
+            cookies_from_browser=cookies_from_browser,
+            proxy_url=proxy_url,
+            metadata=metadata,
+        )
+        _cleanup_temp_cookies()  # avoid leaking temp cookie files on this early return
+        return res
+
+    # --- Build base yt-dlp command for YouTube ladder ---
+    if user_agent:
+        enrich += [
+            "--user-agent", user_agent,
+            "--add-header", "Accept-Language: en-US,en;q=0.9",
+            "--add-header", "Referer: https://www.youtube.com/",
+        ]
+    if getattr(Config, "YTDLP_GEO_BYPASS", True):
+        enrich += ["--geo-bypass", "--geo-bypass-country", getattr(Config, "YTDLP_GEO_COUNTRY", "US")]
+    if temp_cookies_file:
+        enrich += ["--cookies", temp_cookies_file]
+    elif cookies_from_browser:
+        enrich += ["--cookies-from-browser", cookies_from_browser]
+
+    base_cmd = [
+        YT_DLP_PATH, url,
+        "-x", "--audio-format", Config.AUDIO_FORMAT,
+        "--no-playlist", "--no-write-info-json",
+        "--progress", "--no-simulate", "--no-abort-on-error",
+        "--restrict-filenames",
+        "-o", output_path_template,
+        "--force-ipv4",
+    ] + enrich
+
+    attempts: list[tuple[str, list[str]]] = [
+        ("primary", base_cmd),
+        ("tv_embedded", base_cmd + ["--extractor-args", "youtube:player_client=tv_embedded"]),
+        ("web_forced", base_cmd + ["--extractor-args", "youtube:webpage_download_web=1"]),
+        ("bestaudio_ladder",
+            [YT_DLP_PATH, url, "-f", "251/140/bestaudio/best",
+             "--no-playlist", "--no-write-info-json", "--progress", "--no-simulate",
+             "--no-abort-on-error", "--restrict-filenames", "-o", output_path_template,
+             "--force-ipv4"] + enrich),
     ]
-    # Note: ffmpeg must be installed and in the system's PATH for audio format conversion.
-    # The command execution will handle the download, audio extraction, conversion, and saving.
 
-    logging.info(f"Attempting to download audio from: {url}")
-    # Log the command being executed for debugging purposes
-    logging.debug(f"yt-dlp command: {' '.join(cmd)}")
+    log.info("Attempting to download audio from: %s", url)
+
+    apify_tried = False
+    last_err: Optional[Exception] = None
 
     try:
-        # Execute the yt-dlp command using subprocess
-        result = subprocess.run(
-            cmd,
-            check=True,         # Raise CalledProcessError if the command returns a non-zero exit code
-            capture_output=True, # Capture standard output and standard error
-            text=True,          # Decode stdout/stderr as text
-            encoding='utf-8'    # Specify encoding for text decoding
-        )
-        # Log the standard output and standard error from the yt-dlp process
-        logging.info(f"yt-dlp stdout:\n{result.stdout}")
-        if result.stderr:
-            logging.warning(f"yt-dlp stderr:\n{result.stderr}")
+        for label, cmd in attempts:
+            try:
+                log.debug("[yt-dlp] Attempt '%s': %s", label, " ".join(cmd))
+                cp = subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
+                if cp.stdout:
+                    log.info("yt-dlp stdout:\n%s", cp.stdout)
+                if cp.stderr:
+                    log.debug("yt-dlp stderr:\n%s", cp.stderr)
 
-        # Verify if the expected final audio file exists after the download
-        if final_audio_path.exists():
-            logging.info(f"Successfully downloaded audio to: {final_audio_path}")
-            # Return the path to the downloaded file and the extracted metadata
-            return (str(final_audio_path), metadata)
-        else:
-            # Log an error if the expected file is not found, even if the process exited successfully
-            logging.error(f"yt-dlp completed but expected output file '{final_audio_path}' not found.")
-            logging.error("Please check yt-dlp output above for clues.")
-            # Attempt to find any audio file that might have been created with a different extension
-            audio_files = list(output_dir.glob(f"{base_filename}.*"))
-            possible_audio = [f for f in audio_files if f.suffix.lower() in ['.mp3', '.m4a', '.wav', '.ogg', '.opus']]
-            if possible_audio:
-                 # If an alternative audio file is found, log a warning and return its path
-                 found_path = str(possible_audio[0])
-                 logging.warning(f"Found an alternative audio file: {found_path}. Returning this path.")
-                 return (found_path, metadata)
-            # If no suitable audio file is found, return None
-            return None
+                if final_audio_path.exists():
+                    log.info("Success (%s) → %s", label, final_audio_path)
+                    _cleanup_temp_cookies()
+                    return (str(final_audio_path), {**metadata, "download_attempt": label})
 
-    # --- Error Handling Strategy for subprocess execution ---
-    # Handle specific exceptions that can occur during subprocess execution:
-    # 1. CalledProcessError: Raised when the yt-dlp command returns a non-zero exit code.
-    #    - Log the error code, command, and stderr for debugging.
-    # 2. FileNotFoundError: Raised if the yt-dlp executable is not found.
-    #    - Log a clear error message indicating the missing executable.
-    # 3. Other exceptions: Catch any other unexpected errors during the process.
-    #    - Log the error with traceback information.
-    except subprocess.CalledProcessError as e:
-        logging.error(f"yt-dlp failed (Exit Code {e.returncode}). URL: {url}")
-        logging.error(f"Command: {' '.join(e.cmd)}")
-        logging.error(f"Stderr:\n{e.stderr}")
-        return None
-    except FileNotFoundError:
-        logging.error(f"'{YT_DLP_PATH}' command not found. Is yt-dlp installed and in PATH?")
-        return None
-    except Exception as e:
-        logging.error(f"An unexpected error occurred during download: {e}", exc_info=True)
-        return None
+                for cand in sorted(output_dir.glob(f"{base_filename}.*"),
+                                   key=lambda p: p.stat().st_mtime, reverse=True):
+                    if cand.suffix.lower() in [".mp3", ".m4a", ".webm", ".opus", ".ogg", ".wav"]:
+                        if cand.suffix.lower() == ".mp3":
+                            log.info("Success (%s) → %s", label, cand)
+                            _cleanup_temp_cookies()
+                            return (str(cand), {**metadata, "download_attempt": label})
+                        out = _ensure_mp3(cand, final_audio_path)
+                        if out:
+                            log.info("Success (%s) + convert → %s", label, out)
+                            _cleanup_temp_cookies()
+                            return (out, {**metadata, "download_attempt": label})
+
+                log.error("Attempt '%s' completed but no usable audio file was produced.", label)
+                last_err = RuntimeError("yt-dlp completed without producing expected output.")
+
+            except subprocess.CalledProcessError as e:
+                stderr = e.stderr or ""
+                log.error("yt-dlp failed (Exit %s) on attempt '%s'. URL: %s", e.returncode, label, url)
+                log.error("Command: %s", " ".join(e.cmd if isinstance(e.cmd, list) else [str(e.cmd)]))
+                if stderr:
+                    log.error("Stderr:\n%s", stderr)
+                last_err = e
+
+                if not apify_tried and _is_region_lock(stderr):
+                    apify_tried = True
+                    log.info("Detected region lock on attempt '%s'. Trying Apify fallback immediately…", label)
+                    ap = _apify_download_audio(url, output_dir, base_filename)
+                    if ap:
+                        _cleanup_temp_cookies()
+                        ap_path, ap_meta = ap
+                        return (ap_path, {**metadata, **ap_meta})
+                    else:
+                        log.error("Apify fallback failed; continuing ladder.")
+                continue
+
+            except FileNotFoundError:
+                log.error("'%s' not found. Is yt-dlp installed and in PATH?", YT_DLP_PATH)
+                last_err = FileNotFoundError("yt-dlp not found")
+                break
+
+            except Exception as e:
+                log.error("Unexpected error during download (attempt '%s'): %s", label, e, exc_info=True)
+                last_err = e
+                continue
+
+    finally:
+        _cleanup_temp_cookies()
+
+    log.error("All yt-dlp attempts failed.")
+    if not apify_tried:
+        log.info("Trying Apify fallback at end…")
+        ap = _apify_download_audio(url, output_dir, base_filename)
+        if ap:
+            ap_path, ap_meta = ap
+            return (ap_path, {**metadata, **ap_meta})
+
+    if last_err:
+        log.error("Last error: %s", last_err)
+    return None
 
 
 
@@ -1483,6 +1527,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
 
 
 
