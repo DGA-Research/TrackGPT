@@ -49,6 +49,123 @@ except ImportError:
     print("ERROR: 'yt-dlp' library not found. Install using: pip install yt-dlp", file=sys.stderr)
     sys.exit(1)
 
+def _gcs_find_and_download(
+    bucket_name: str,
+    service_json_str: str,
+    output_dir: Path,
+    desired_basename: str,
+    url: str | None = None,
+) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """
+    Look inside a GCS bucket (credentials from JSON string) for an object that
+    looks like our downloaded audio. Strategy:
+
+      1) Try exact "<desired_basename>.mp3"
+      2) Try prefix match "desired_basename*"
+      3) If YouTube URL provided, extract video id and look for objects that contain it
+      4) Otherwise, pick the most recently updated *.mp3 created in the last few minutes
+
+    Downloads the best match to output_dir/<desired_basename>.mp3 and returns (path, meta)
+    """
+    try:
+        from google.cloud import storage  # lazy import
+    except Exception as e:
+        log.error("google-cloud-storage not installed: %s", e)
+        return None
+
+    try:
+        sa_info = json.loads(service_json_str)
+    except Exception as e:
+        log.error("GCS service key string is not valid JSON: %s", e)
+        return None
+
+    try:
+        client = storage.Client.from_service_account_info(sa_info)
+        bucket = client.bucket(bucket_name)
+    except Exception as e:
+        log.error("Failed to init GCS client/bucket: %s", e)
+        return None
+
+    candidates = []
+
+    # convenience: target filename we want locally
+    target_local = output_dir / f"{desired_basename}.mp3"
+
+    # 1) exact match first
+    try:
+        blob = bucket.blob(f"{desired_basename}.mp3")
+        if blob.exists(client):
+            candidates.append(blob)
+    except Exception:
+        pass
+
+    # 2) prefix match
+    try:
+        for blob in client.list_blobs(bucket_name, prefix=desired_basename):
+            if blob.name.lower().endswith(".mp3"):
+                candidates.append(blob)
+    except Exception:
+        pass
+
+    # 3) try YouTube id in name
+    vid = None
+    if url:
+        # crude extract v=XXXXXXXXXXX
+        import re
+        m = re.search(r"[?&]v=([A-Za-z0-9_-]{11})", url)
+        if not m:
+            # also handle youtu.be/XXXXXXXXXXX
+            m = re.search(r"youtu\.be/([A-Za-z0-9_-]{11})", url)
+        if m:
+            vid = m.group(1)
+            try:
+                for blob in client.list_blobs(bucket_name):
+                    nm = blob.name.lower()
+                    if nm.endswith(".mp3") and (vid.lower() in nm):
+                        candidates.append(blob)
+            except Exception:
+                pass
+
+    # 4) no good matches yet – grab recent *.mp3 and pick latest
+    if not candidates:
+        try:
+            for blob in client.list_blobs(bucket_name):
+                if blob.name.lower().endswith(".mp3"):
+                    candidates.append(blob)
+        except Exception:
+            pass
+
+    if not candidates:
+        log.error("GCS fallback: no objects found in bucket '%s' matching mp3 + patterns.", bucket_name)
+        return None
+
+    # Deduplicate and pick the newest by updated timestamp
+    uniq = {}
+    for b in candidates:
+        uniq[b.name] = b
+    candidates = list(uniq.values())
+    candidates.sort(key=lambda b: getattr(b, "updated", None) or getattr(b, "time_created", None), reverse=True)
+
+    best = candidates[0]
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        best.download_to_filename(target_local)
+        if target_local.exists() and target_local.stat().st_size > 0:
+            log.info("GCS fallback success → %s (source: gs://%s/%s)", target_local, bucket_name, best.name)
+            meta = {
+                "extractor": "apify_gcs",
+                "webpage_url": url or "",
+                "gcs_bucket": bucket_name,
+                "gcs_object": best.name,
+                "download_attempt": "apify_gcs_fallback",
+            }
+            return str(target_local), meta
+        else:
+            log.error("GCS fallback: downloaded file is empty/missing: %s", target_local)
+    except Exception as e:
+        log.error("GCS fallback: error downloading %s: %s", best.name, e)
+
+    return None
 
 def find_yt_dlp_executable() -> Optional[str]:
     """Locates the yt-dlp executable on the system."""
@@ -394,40 +511,63 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
     ds_id = run_obj.get("defaultDatasetId")                 # <-- FIX #3 uses unwrapped run_obj
     kv_id = run_obj.get("defaultKeyValueStoreId")
 
-    # Get items from dataset or OUTPUT record
+    # Did we ask Apify to upload to GCS?
+    gcs_key_raw = os.getenv("APIFY_GCS_SERVICE_JSON", "").strip()
+    gcs_bucket  = os.getenv("APIFY_GCS_BUCKET", "").strip()
+    asked_gcs   = bool(gcs_key_raw and gcs_bucket)  # because you set uploadTo="gcs" when both exist
+    
+    # 1) Try dataset/OUTPUT as you already do
     items = _apify_fetch_dataset_items(ds_id, token) if ds_id else []
     if not items and kv_id:
         out = _apify_fetch_output_record(kv_id, token)
         items = [out] if isinstance(out, dict) else (out or [])
 
+
     audio_url = _pick_audio_url_from_items(items)
-    if not audio_url:
-        log.error("Apify: no audio URL found in dataset/OUTPUT.")
-        return None
 
-    # Download returned audio
-    out_path = output_dir / f"{base_filename}.mp3"
-    try:
-        with requests.get(audio_url, stream=True, timeout=300) as resp:
-            resp.raise_for_status()
-            with open(out_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=1024 * 256):
-                    if chunk:
-                        f.write(chunk)
-        if out_path.exists() and out_path.stat().st_size > 0:
-            meta = {
-                "extractor": "apify",
-                "webpage_url": url,
-                "download_attempt": "apify_fallback",
-                "apify_run_id": run_id,
-                "dataset_id": ds_id,
-                "kv_store_id": kv_id,
-            }
-            log.info("Apify fallback success → %s", out_path)
-            return str(out_path), meta
-    except Exception as e:
-        log.error("Apify: error downloading returned audio URL: %s", e)
+    # 2) If no URL found but we uploaded to GCS, search the bucket directly
+    if not audio_url and asked_gcs:
+        log.info("Apify yielded no direct URL; trying GCS bucket lookup…")
+        gcs_res = _gcs_find_and_download(
+            bucket_name=gcs_bucket,
+            service_json_str=gcs_key_raw,
+            output_dir=output_dir,
+            desired_basename=base_filename,
+            url=url,
+        )
+        if gcs_res:
+            # Done – we found and downloaded the mp3 from GCS
+            return gcs_res
+        else:
+            log.error("GCS lookup failed to find a matching audio object.")
 
+
+    # 3) If you DID get a direct URL from the Apify item, keep your current download logic
+    if audio_url:
+        out_path = output_dir / f"{base_filename}.mp3"
+        try:
+            with requests.get(audio_url, stream=True, timeout=300) as r:
+                r.raise_for_status()
+                with open(out_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=1024 * 256):
+                        if chunk:
+                            f.write(chunk)
+            if out_path.exists() and out_path.stat().st_size > 0:
+                meta = {
+                    "extractor": "apify",
+                    "webpage_url": url,
+                    "download_attempt": "apify_fallback",
+                    "apify_run_id": run_obj.get("id"),
+                    "dataset_id": ds_id,
+                    "kv_store_id": kv_id,
+                }
+                log.info("Apify fallback success → %s", out_path)
+                return str(out_path), meta
+        except Exception as e:
+            log.error("Apify: error downloading returned audio URL: %s", e)
+
+    # 4) Nothing worked
+    log.error("Apify: no audio URL found and GCS lookup failed.")
     return None
 
 
@@ -850,6 +990,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
 
 
 
