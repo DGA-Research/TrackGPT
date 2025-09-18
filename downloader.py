@@ -55,17 +55,16 @@ def _gcs_find_and_download(
     output_dir: Path,
     desired_basename: str,
     url: str | None = None,
+    max_age_minutes: int = 60,
 ) -> Optional[Tuple[str, Dict[str, Any]]]:
     """
-    Look inside a GCS bucket (credentials from JSON string) for an object that
-    looks like our downloaded audio. Strategy:
-
-      1) Try exact "<desired_basename>.mp3"
-      2) Try prefix match "desired_basename*"
-      3) If YouTube URL provided, extract video id and look for objects that contain it
-      4) Otherwise, pick the most recently updated *.mp3 created in the last few minutes
-
-    Downloads the best match to output_dir/<desired_basename>.mp3 and returns (path, meta)
+    Search GCS for an audio object produced by the Apify actor and download it.
+    Strategy:
+      - Try exact desired_basename with *any* audio extension.
+      - Try prefix matches for desired_basename.
+      - Prefer files that contain the YouTube video ID.
+      - Otherwise pick the newest audio file (optionally within recent time window).
+    Convert to MP3 if the downloaded file isn't already .mp3.
     """
     try:
         from google.cloud import storage  # lazy import
@@ -75,97 +74,127 @@ def _gcs_find_and_download(
 
     try:
         sa_info = json.loads(service_json_str)
-    except Exception as e:
-        log.error("GCS service key string is not valid JSON: %s", e)
-        return None
-
-    try:
         client = storage.Client.from_service_account_info(sa_info)
         bucket = client.bucket(bucket_name)
     except Exception as e:
         log.error("Failed to init GCS client/bucket: %s", e)
         return None
 
+    # Accept many audio extensions, including the actor's occasional ".mpga"
+    AUDIO_EXTS = (".mp3", ".mpga", ".m4a", ".webm", ".opus", ".ogg", ".wav")
+
+    def _is_audio_name(name: str) -> bool:
+        n = name.lower()
+        return n.endswith(AUDIO_EXTS) or n.endswith(".mp3.mpga")
+
+    # Extract YT video ID (for Apify’s naming: "<videoId>_<title>.<ext>")
+    def _extract_youtube_id(u: str) -> Optional[str]:
+        import re
+        m = re.search(r"[?&]v=([A-Za-z0-9_-]{11})", u or "")
+        if m: return m.group(1)
+        m = re.search(r"youtu\.be/([A-Za-z0-9_-]{11})", u or "")
+        return m.group(1) if m else None
+
+    video_id = _extract_youtube_id(url) if url else None
+
     candidates = []
 
-    # convenience: target filename we want locally
-    target_local = output_dir / f"{desired_basename}.mp3"
-
-    # 1) exact match first
-    try:
-        blob = bucket.blob(f"{desired_basename}.mp3")
-        if blob.exists(client):
-            candidates.append(blob)
-    except Exception:
-        pass
-
-    # 2) prefix match
-    try:
-        for blob in client.list_blobs(bucket_name, prefix=desired_basename):
-            if blob.name.lower().endswith(".mp3"):
-                candidates.append(blob)
-    except Exception:
-        pass
-
-    # 3) try YouTube id in name
-    vid = None
-    if url:
-        # crude extract v=XXXXXXXXXXX
-        import re
-        m = re.search(r"[?&]v=([A-Za-z0-9_-]{11})", url)
-        if not m:
-            # also handle youtu.be/XXXXXXXXXXX
-            m = re.search(r"youtu\.be/([A-Za-z0-9_-]{11})", url)
-        if m:
-            vid = m.group(1)
-            try:
-                for blob in client.list_blobs(bucket_name):
-                    nm = blob.name.lower()
-                    if nm.endswith(".mp3") and (vid.lower() in nm):
-                        candidates.append(blob)
-            except Exception:
-                pass
-
-    # 4) no good matches yet – grab recent *.mp3 and pick latest
-    if not candidates:
+    # 1) exact desired_basename + any ext (in case you forced a template)
+    for ext in AUDIO_EXTS + (".mp3.mpga",):
         try:
-            for blob in client.list_blobs(bucket_name):
-                if blob.name.lower().endswith(".mp3"):
-                    candidates.append(blob)
+            blob = bucket.blob(f"{desired_basename}{ext}")
+            if blob.exists(client):
+                candidates.append(blob)
         except Exception:
             pass
 
-    if not candidates:
-        log.error("GCS fallback: no objects found in bucket '%s' matching mp3 + patterns.", bucket_name)
+    # 2) prefix match with desired_basename
+    try:
+        for blob in client.list_blobs(bucket_name, prefix=desired_basename):
+            if _is_audio_name(blob.name):
+                candidates.append(blob)
+    except Exception as e:
+        log.debug("GCS prefix list failed: %s", e)
+
+    # 3) prefer files containing the video ID (most reliable with this actor)
+    if video_id:
+        try:
+            # fast path: objects that start with the id
+            for blob in client.list_blobs(bucket_name, prefix=video_id):
+                if _is_audio_name(blob.name):
+                    candidates.append(blob)
+        except Exception as e:
+            log.debug("GCS id-prefix list failed: %s", e)
+        try:
+            # fallback: any object that contains the id
+            for blob in client.list_blobs(bucket_name):
+                if _is_audio_name(blob.name) and video_id in blob.name:
+                    candidates.append(blob)
+        except Exception as e:
+            log.debug("GCS full scan failed: %s", e)
+
+    # 4) last resort: newest audio in the (recent) bucket
+    try:
+        import datetime as _dt
+        cutoff = _dt.datetime.utcnow() - _dt.timedelta(minutes=max_age_minutes)
+    except Exception:
+        cutoff = None
+
+    try:
+        for blob in client.list_blobs(bucket_name):
+            if _is_audio_name(blob.name):
+                upd = getattr(blob, "updated", None)
+                if (not cutoff) or (upd and upd.replace(tzinfo=None) >= cutoff):
+                    candidates.append(blob)
+    except Exception as e:
+        log.debug("GCS list for fallback failed: %s", e)
+
+    # Dedup & pick newest
+    uniq = {b.name: b for b in candidates}
+    if not uniq:
+        log.error("GCS fallback: no audio-like objects found in '%s'. Looked for %s", bucket_name, AUDIO_EXTS)
         return None
 
-    # Deduplicate and pick the newest by updated timestamp
-    uniq = {}
-    for b in candidates:
-        uniq[b.name] = b
-    candidates = list(uniq.values())
-    candidates.sort(key=lambda b: getattr(b, "updated", None) or getattr(b, "time_created", None), reverse=True)
+    blobs = list(uniq.values())
+    blobs.sort(key=lambda b: getattr(b, "updated", None) or getattr(b, "time_created", None), reverse=True)
+    best = blobs[0]
+    log.info("GCS candidate: gs://%s/%s", bucket_name, best.name)
 
-    best = candidates[0]
+    # Download with its original extension, then ensure MP3
+    orig_ext = Path(best.name).suffix.lower()
+    tmp_path = output_dir / (desired_basename + (orig_ext if orig_ext else ".bin"))
+    out_mp3 = output_dir / f"{desired_basename}.mp3"
+
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
-        best.download_to_filename(target_local)
-        if target_local.exists() and target_local.stat().st_size > 0:
-            log.info("GCS fallback success → %s (source: gs://%s/%s)", target_local, bucket_name, best.name)
-            meta = {
-                "extractor": "apify_gcs",
-                "webpage_url": url or "",
-                "gcs_bucket": bucket_name,
-                "gcs_object": best.name,
-                "download_attempt": "apify_gcs_fallback",
-            }
-            return str(target_local), meta
+        best.download_to_filename(tmp_path)
+
+        if tmp_path.suffix != ".mp3":
+            final = _ensure_mp3(tmp_path, out_mp3)
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
+            if not final:
+                log.error("GCS fallback: conversion failed for %s", best.name)
+                return None
+            final_path = final
         else:
-            log.error("GCS fallback: downloaded file is empty/missing: %s", target_local)
+            final_path = str(tmp_path)
+
+        log.info("GCS fallback success → %s (source: gs://%s/%s)", final_path, bucket_name, best.name)
+        meta = {
+            "extractor": "apify_gcs",
+            "webpage_url": url or "",
+            "gcs_bucket": bucket_name,
+            "gcs_object": best.name,
+            "download_attempt": "apify_gcs_fallback",
+        }
+        return final_path, meta
     except Exception as e:
         log.error("GCS fallback: error downloading %s: %s", best.name, e)
+        return None
 
-    return None
 
 def find_yt_dlp_executable() -> Optional[str]:
     """Locates the yt-dlp executable on the system."""
@@ -379,26 +408,21 @@ def _is_region_lock(msg: str) -> bool:
 
 
 def _pick_audio_url_from_items(items: list[dict]) -> Optional[str]:
-    """Scan common shapes returned by the actor for a direct audio URL."""
     if not items:
         return None
     x = items[0] or {}
-
-    # new style: explicit 'downloads' list
     dls = x.get("downloads") or []
     for d in dls:
         t = (d.get("type") or "").lower()
         f = (d.get("format") or "").lower()
         u = d.get("url")
-        if u and ("audio" in t or f in ("mp3", "m4a", "opus", "webm", "ogg")):
+        if u and ("audio" in t or f in ("mp3", "mpga", "m4a", "opus", "webm", "ogg", "wav")):
             return u
-
-    # flat fields some builds expose
     for key in ("audioUrl", "audio", "audio_link", "url"):
         if x.get(key):
             return x[key]
-
     return None
+
 
 def _apify_get(url: str, **kw):
     r = requests.get(url, timeout=kw.pop("timeout", 30))
@@ -1057,3 +1081,4 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
