@@ -296,8 +296,8 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
     if gcs_key_raw and gcs_bucket:
         payload["uploadTo"] = "gcs"                # <-- explicitly select uploader section
             # IMPORTANT: googleCloudServiceKey must be a STRING (the JSON), not an object
-            payload["googleCloudServiceKey"] = gcs_key_raw
-            payload["googleCloudBucketName"] = gcs_bucket
+        payload["googleCloudServiceKey"] = gcs_key_raw
+        payload["googleCloudBucketName"] = gcs_bucket
     else:
         payload["uploadTo"] = "none"
         payload["returnOnlyInfo"] = True           # avoid “select an uploader…” error
@@ -813,6 +813,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
 
 
 
