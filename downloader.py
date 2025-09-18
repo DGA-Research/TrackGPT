@@ -15,6 +15,9 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 from config import Config
 
+from urllib.parse import urlsplit
+
+
 # --- Dependency Checks ---
 try:
     import yt_dlp
@@ -39,6 +42,117 @@ def find_yt_dlp_executable() -> Optional[str]:
         # Fallback to searching system PATH if internal helper is not available
         import shutil
         return shutil.which("yt-dlp")
+
+
+# add near the top with other imports
+from urllib.parse import urlsplit
+
+# --- helper: cheap YouTube detector ---
+def _looks_like_youtube(u: str) -> bool:
+    try:
+        host = urlsplit(u).netloc.lower()
+    except Exception:
+        return False
+    return (
+        "youtube.com" in host
+        or "youtu.be" in host
+        or "youtube-nocookie.com" in host
+    )
+
+# --- generic downloader for non-YouTube hosts (Brightcove, JWPlayer, etc.) ---
+def _download_non_youtube(
+    url: str,
+    output_dir: Path,
+    base_filename: str,
+    *,
+    user_agent: str = "",
+    cookies_file: Optional[str] = None,
+    cookies_from_browser: str = "",
+    proxy_url: str = "",
+    metadata: Dict[str, Any] | None = None,
+) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """
+    Minimal, robust path for non-YouTube URLs:
+    - adds UA and a site Referer header
+    - supports cookies/proxy
+    - hard timeouts so subprocess cannot hang
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_tpl = str(output_dir / f"{base_filename}.%(ext)s")
+    final_mp3 = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
+
+    # headers for generic sites
+    hdrs: list[str] = []
+    if user_agent:
+        hdrs += ["--user-agent", user_agent, "--add-header", "Accept-Language: en-US,en;q=0.9"]
+
+    # most sites want a same-origin referer
+    try:
+        u = urlsplit(url)
+        origin = f"{u.scheme}://{u.netloc}/"
+        hdrs += ["--add-header", f"Referer: {origin}"]
+    except Exception:
+        pass
+
+    # auth / proxy
+    if cookies_file:
+        hdrs += ["--cookies", cookies_file]
+    elif cookies_from_browser:
+        hdrs += ["--cookies-from-browser", cookies_from_browser]
+    if proxy_url:
+        hdrs += ["--proxy", proxy_url]
+
+    cmd = [
+        YT_DLP_PATH,
+        url,
+        "-x", "--audio-format", Config.AUDIO_FORMAT,
+        "--no-playlist", "--no-write-info-json",
+        "--progress", "--no-simulate", "--no-abort-on-error",
+        "-o", out_tpl,
+    ] + hdrs
+
+    # ensure we never hang forever
+    subproc_timeout_s = int(os.getenv("YTDLP_SUBPROC_TIMEOUT_S", "240"))
+
+    log.info("Non-YouTube URL detected; using generic path.")
+    log.debug("yt-dlp (non-yt) command: %s", " ".join(cmd))
+    try:
+        cp = subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=subproc_timeout_s,
+        )
+        if cp.stdout:
+            log.info("yt-dlp stdout:\n%s", cp.stdout)
+        if cp.stderr:
+            log.debug("yt-dlp stderr:\n%s", cp.stderr)
+
+        if final_mp3.exists():
+            return str(final_mp3), {**(metadata or {}), "download_attempt": "non_yt"}
+
+        # fallback: convert any audio we did get
+        for cand in sorted(output_dir.glob(f"{base_filename}.*"), key=lambda p: p.stat().st_mtime, reverse=True):
+            if cand.suffix.lower() in [".mp3", ".m4a", ".webm", ".opus", ".ogg", ".wav"]:
+                if cand.suffix.lower() == ".mp3":
+                    return str(cand), {**(metadata or {}), "download_attempt": "non_yt"}
+                conv = _ensure_mp3(cand, final_mp3)
+                if conv:
+                    return conv, {**(metadata or {}), "download_attempt": "non_yt"}
+
+        log.error("Non-YT: yt-dlp completed but no audio file was produced.")
+        return None
+
+    except subprocess.TimeoutExpired:
+        log.error("Non-YT: yt-dlp timed out after %s s", subproc_timeout_s)
+        return None
+    except subprocess.CalledProcessError as e:
+        log.error("Non-YT: yt-dlp failed (exit %s)\nCmd: %s\nStderr:\n%s",
+                  e.returncode, " ".join(e.cmd if isinstance(e.cmd, list) else [str(e.cmd)]), e.stderr or "")
+        return None
+
 
 def find_ffmpeg_executable() -> Optional[str]:
     """
@@ -83,6 +197,19 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         successful. Returns None if the download or metadata extraction fails
         after handling errors.
     """
+    # >>> EARLY NON-YOUTUBE BRANCH <<<
+    if not _looks_like_youtube(url):
+        # use generic path with sane timeout; no YT-only flags
+        return _download_non_youtube(
+            url,
+            output_dir,
+            base_filename,
+            user_agent=user_agent,
+            cookies_file=temp_cookies_file,
+            cookies_from_browser=cookies_from_browser,
+            proxy_url=proxy_url,
+            metadata=metadata,
+        )
     # Check if yt-dlp executable was found during initial checks
     if not YT_DLP_PATH:
          logging.error("yt-dlp executable not found. Cannot download.")
@@ -229,3 +356,4 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     except Exception as e:
         logging.error(f"An unexpected error occurred during download: {e}", exc_info=True)
         return None
+
