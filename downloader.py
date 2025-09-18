@@ -1258,20 +1258,6 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         log.error("Failed to create output directory %s: %s", output_dir, e)
         return None
 
-        # >>> EARLY NON-YOUTUBE BRANCH <<<
-    if not _looks_like_youtube(url):
-        # use generic path with sane timeout; no YT-only flags
-        return _download_non_youtube(
-            url,
-            output_dir,
-            base_filename,
-            user_agent=user_agent,
-            cookies_file=temp_cookies_file,
-            cookies_from_browser=cookies_from_browser,
-            proxy_url=proxy_url,
-            metadata=metadata,
-        )
-        
     # Paths & filenames
     output_path_template = str(output_dir / f"{base_filename}.%(ext)s")
     final_audio_path = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
@@ -1311,7 +1297,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
             log.info("Using temp cookies file at: %s", temp_cookies_file)
         except Exception as e:
             log.warning("Could not create temp cookies file from '%s': %s. Continuing without cookies.", orig_cookies_file, e)
-            temp_cookies_file = None
+            temp_cookies_file = None        
 
     def _cleanup_temp_cookies():
         for p in temp_paths_to_cleanup:
@@ -1329,6 +1315,20 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         ydl_opts['cookiesfrombrowser'] = cookies_from_browser
     if user_agent:
         ydl_opts['user_agent'] = user_agent
+
+    # >>> EARLY NON-YOUTUBE BRANCH <<<
+    if not _looks_like_youtube(url):
+        # use generic path with sane timeout; no YT-only flags
+        return _download_non_youtube(
+            url,
+            output_dir,
+            base_filename,
+            user_agent=user_agent,
+            cookies_file=temp_cookies_file,
+            cookies_from_browser=cookies_from_browser,
+            proxy_url=proxy_url,
+            metadata=metadata,
+        )
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -1483,6 +1483,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
 
 
 
