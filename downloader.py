@@ -226,6 +226,30 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         successful. Returns None if the download or metadata extraction fails
         after handling errors.
     """
+    # --- ALWAYS define these first ---
+    proxy_url = os.getenv("YTDLP_PROXY_URL", "").strip()
+    if not proxy_url:
+        ap_pw = os.getenv("APIFY_PROXY_PASSWORD", "").strip()
+        ap_cty = os.getenv("APIFY_PROXY_COUNTRY", "US").strip()
+        if ap_pw:
+            proxy_url = f"http://auto:{ap_pw}@proxy.apify.com:8000/?country={ap_cty}"
+
+    # UA / cookies envs
+    user_agent = os.getenv("YTDLP_USER_AGENT", getattr(Config, "YTDLP_USER_AGENT", "")).strip()
+    cookies_from_browser = os.getenv(
+        "YTDLP_COOKIES_FROM_BROWSER",
+        getattr(Config, "YTDLP_COOKIES_FROM_BROWSER", "") if hasattr(Config, "YTDLP_COOKIES_FROM_BROWSER") else ""
+    ).strip()
+    orig_cookies_file = os.getenv("YTDLP_COOKIES_FILE", getattr(Config, "YTDLP_COOKIES_FILE", "")).strip()
+    cookies_b64 = os.getenv(
+        "YTDLP_COOKIES_B64",
+        getattr(Config, "YTDLP_COOKIES_B64", "") if hasattr(Config, "YTDLP_COOKIES_B64") else ""
+    ).strip()
+
+    # materialize cookie file (this also sets temp_cookies_file)
+    temp_paths_to_cleanup: list[str] = []
+    temp_cookies_file: Optional[str] = None
+    
     # >>> EARLY NON-YOUTUBE BRANCH <<<
     if not _looks_like_youtube(url):
         # use generic path with sane timeout; no YT-only flags
@@ -1207,19 +1231,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
 
     enrich: list[str] = []
     
-    # >>> EARLY NON-YOUTUBE BRANCH <<<
-    if not _looks_like_youtube(url):
-        # use generic path with sane timeout; no YT-only flags
-        return _download_non_youtube(
-            url,
-            output_dir,
-            base_filename,
-            user_agent=user_agent,
-            cookies_file=temp_cookies_file,
-            cookies_from_browser=cookies_from_browser,
-            proxy_url=proxy_url,
-            metadata=metadata,
-        )
+
     
     # Proxy first (so it survives later additions)
     proxy_url = os.getenv("YTDLP_PROXY_URL", "").strip()
@@ -1246,6 +1258,20 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         log.error("Failed to create output directory %s: %s", output_dir, e)
         return None
 
+        # >>> EARLY NON-YOUTUBE BRANCH <<<
+    if not _looks_like_youtube(url):
+        # use generic path with sane timeout; no YT-only flags
+        return _download_non_youtube(
+            url,
+            output_dir,
+            base_filename,
+            user_agent=user_agent,
+            cookies_file=temp_cookies_file,
+            cookies_from_browser=cookies_from_browser,
+            proxy_url=proxy_url,
+            metadata=metadata,
+        )
+        
     # Paths & filenames
     output_path_template = str(output_dir / f"{base_filename}.%(ext)s")
     final_audio_path = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
@@ -1457,5 +1483,6 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
 
 
