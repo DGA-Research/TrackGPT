@@ -661,12 +661,12 @@ def _apify_ytdl_fallback(
             # build a signed record URL from the run’s default KV store
             if not (best_audio_url or best_video_url):
                 kv_key = item0.get("fileName") or item0.get("key") or item0.get("storageFileKey")
-                    if kv_key and kv_id:
-                        from urllib.parse import quote
-                        best_audio_url = (
-                            f"https://api.apify.com/v2/key-value-stores/{kv_id}/records/{quote(kv_key, safe='')}"
-                            + (f"?token={token}" if token else "")
-                        )
+                if kv_key and kv_id:
+                    from urllib.parse import quote
+                    best_audio_url = (
+                        f"https://api.apify.com/v2/key-value-stores/{kv_id}/records/{quote(kv_key, safe='')}"
+                        + (f"?token={token}" if token else "")
+                    )
             if not best_audio_url and not best_video_url:
                 log.error("Apify fallback: no downloadable URLs in actor output / KV.")
                 continue
@@ -990,6 +990,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
 
 
 
