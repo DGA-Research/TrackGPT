@@ -483,12 +483,15 @@ def _apify_ytdl_fallback(
                 log.error("Apify fallback: unexpected response structure. Body: %s", resp.text[:1000])
                 continue
 
-            item0 = items[0]
+            # items already loaded from dataset or OUTPUT
+            item0 = items[0] if isinstance(items, list) and items else (items or {})
             downloads = item0.get("downloads") or []
+
 
             best_audio_url = None
             best_video_url = None
 
+            # Prefer direct audio in the downloads array
             for d in downloads:
                 t = (d.get("type") or "").lower()
                 f = (d.get("format") or "").lower()
@@ -497,26 +500,35 @@ def _apify_ytdl_fallback(
                     best_audio_url = u
                     break
 
+            # Otherwise fall back to a video download we can convert
             if not best_audio_url:
                 for d in downloads:
-                    f = (d.get("format") or "").lower()
-                    u = d.get("url")
-                    if u and (f in ("mp4", "webm") or "video" in (d.get("type") or "").lower()):
-                        best_video_url = u
-                        break
+                f = (d.get("format") or "").lower()
+                u = d.get("url")
+                if u and (f in ("mp4", "webm") or "video" in (d.get("type") or "").lower()):
+                    best_video_url = u
+                    break
 
+            # Try common flat fields some actor versions emit
             if not best_audio_url:
-                for key in ("audioUrl", "audio", "audio_link"):
-                    if item0.get(key):
-                        best_audio_url = item0[key]
+                for key in ("fileUrl", "downloadUrl", "directUrl", "kvStoreRecordUrl", "audioUrl", "audio", "audio_link"):
+                    val = item0.get(key)
+                    if isinstance(val, str) and val:
+                        best_audio_url = val
                         break
 
+            # As a last resort, if the item only tells us the stored filename,
+            # build a signed record URL from the run’s default KV store
+            if not (best_audio_url or best_video_url):
+                kv_key = item0.get("fileName") or item0.get("key") or item0.get("storageFileKey")
+                    if kv_key and kv_id:
+                        from urllib.parse import quote
+                        best_audio_url = (
+                            f"https://api.apify.com/v2/key-value-stores/{kv_id}/records/{quote(kv_key, safe='')}"
+                            + (f"?token={token}" if token else "")
+                        )
             if not best_audio_url and not best_video_url:
-                if item0.get("url"):
-                    best_video_url = item0["url"]
-
-            if not best_audio_url and not best_video_url:
-                log.error("Apify fallback: no downloadable URLs in actor output.")
+                log.error("Apify fallback: no downloadable URLs in actor output / KV.")
                 continue
 
             tmp_in = output_dir / f"{base_filename}.apify.tmp"
@@ -838,6 +850,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
 
 
 
