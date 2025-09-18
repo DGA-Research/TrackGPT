@@ -277,12 +277,14 @@ def _apify_poll_run(actor: str, run_id: str, token: str,
         time.sleep(max(0.5, poll_interval_ms / 1000.0))
     return last  # may still be RUNNING
 
+
 def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Optional[Tuple[str, Dict[str, Any]]]:
     """
-    Run 'streamers/youtube-video-downloader' via API with proper schema:
-      - videos: [url]
+    Run 'streamers/youtube-video-downloader' via API with the correct schema:
+      - videos: [{ "url": <string> }]
       - preferredFormat: 'mp3'
       - useApifyProxy / proxyCountry
+      - uploader selection via 'uploadTo' (e.g. 'gcs')
       - optional GCS: googleCloudServiceKey, googleCloudBucketName
     Then pull dataset/KV results and download the audio locally.
     """
@@ -291,77 +293,90 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
         log.warning("APIFY_TOKEN not set; skipping Apify fallback.")
         return None
 
-    # Inputs per actor schema (videos, preferredFormat, etc.).  🚩 Required field name is *videos*.
-    # https://apify.com/streamers/youtube-video-downloader/input-schema
+    # Build base payload (per actor input schema)
     payload: dict[str, Any] = {
-        "videos": [url],
+        "videos": [{"url": url}],                   # <-- object list, not just strings
         "preferredFormat": "mp3",
         "useApifyProxy": True,
         "proxyCountry": os.getenv("APIFY_PROXY_COUNTRY", "US"),
-        # Give the output a stable base filename (actor adds extension)
         "fileNameTemplate": base_filename,
     }
 
-    # If GCS creds are provided, enable direct upload
-    gcs_key = os.getenv("APIFY_GCS_SERVICE_JSON", "").strip()
-    gcs_bucket = os.getenv("APIFY_GCS_BUCKET", "").strip()
-    gcs_enabled = bool(gcs_key and gcs_bucket)
-    if gcs_enabled:
-        payload["googleCloudServiceKey"] = gcs_key  # raw JSON string
+    # If GCS creds present, enable uploading; otherwise return links only
+    gcs_key_raw = os.getenv("APIFY_GCS_SERVICE_JSON", "").strip()
+    gcs_bucket  = os.getenv("APIFY_GCS_BUCKET", "").strip()
+    if gcs_key_raw and gcs_bucket:
+        payload["uploadTo"] = "gcs"                # <-- explicitly select uploader section
+        # Try to pass a parsed object; if parsing fails, pass the raw string
+        try:
+            payload["googleCloudServiceKey"] = json.loads(gcs_key_raw)
+        except Exception:
+            payload["googleCloudServiceKey"] = gcs_key_raw
         payload["googleCloudBucketName"] = gcs_bucket
     else:
-        # If we don't provide any uploader credentials, avoid the actor error by returning only info
-        payload["returnOnlyInfo"] = True  # matches "Return only info" in schema
+        payload["uploadTo"] = "none"
+        payload["returnOnlyInfo"] = True           # avoid “select an uploader…” error
 
-    # Time controls
-    wait_for_finish = min(int(os.getenv("APIFY_WAIT_FOR_FINISH_SECS", "60")), 60)
-    poll_timeout_ms = int(os.getenv("APIFY_POLL_TIMEOUT_MS", "300000"))
+    # Time controls (tweak via env)
+    wait_for_finish = int(os.getenv("APIFY_WAIT_FOR_FINISH_SECS", "60"))
+    poll_timeout_ms = int(os.getenv("APIFY_POLL_TIMEOUT_MS", "600000"))  # 10 min
     poll_interval_ms = int(os.getenv("APIFY_POLL_INTERVAL_MS", "3000"))
 
-    act_base = f"https://api.apify.com/v2/acts/{APIFY_ACTOR}"
-    # 1) Try a sync-ish start (server waits up to 60s)
+    # Start the actor run (server-side will wait up to wait_for_finish seconds)
+    actor_slug = os.getenv("APIFY_ACTOR", "streamers~youtube-video-downloader")
+    act_base = f"https://api.apify.com/v2/acts/{actor_slug}"
+
     try:
-        log.info("Apify fallback: start run (payload keys=%s)", list(payload.keys()))
         start_url = f"{act_base}/runs?token={token}&waitForFinish={wait_for_finish}"
-        run_obj = _apify_post(start_url, payload, timeout=90).json()
-    except requests.HTTPError as e:
-        log.error("Apify start HTTP %s. Body: %s", e.response.status_code if e.response else "?", e.response.text if e.response else "")
-        return None
+        log.info("Apify fallback: start run (payload keys=%s)", list(payload.keys()))
+        r = requests.post(start_url, json=payload, timeout=90)
+        if r.status_code >= 400:
+            # Better diagnostics even if response is missing
+            body = (r.text or "").strip()
+            log.error("Apify start HTTP %s. Body: %s", r.status_code, body[:1000])
+            return None
+        run_obj = r.json()
     except Exception as e:
-        log.error("Apify start failed: %s", e)
+        log.error("Apify start failed: %s", repr(e))
         return None
 
     status = (run_obj.get("status") or "").upper()
     run_id = run_obj.get("id")
     if not run_id:
-        log.error("Apify start: missing run id in response.")
+        log.error("Apify start: missing run id in response: %s", run_obj)
         return None
 
-    # 2) If still RUNNING, poll until finished
+    # If RUNNING, poll the proper run endpoint until done
     if status not in ("SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"):
-        run_obj = _apify_poll_run(APIFY_ACTOR, run_id, token, poll_timeout_ms, poll_interval_ms)
+        run_obj = _apify_poll_run(actor_slug, run_id, token, poll_timeout_ms, poll_interval_ms)
         status = (run_obj.get("status") or "").upper()
 
     if status != "SUCCEEDED":
         msg = run_obj.get("statusMessage") or run_obj.get("errorMessage") or "Unknown error"
         log.error("Apify run FAILED (status=%s, id=%s, msg=%s)", status, run_id, msg)
-        # If we failed because uploader wasn't configured and we didn't set returnOnlyInfo,
-        # retry once with returnOnlyInfo=True to at least get downloadable links.
-        if gcs_enabled and "uploader" in (msg or "").lower():
-            log.info("Retrying Apify with returnOnlyInfo=True…")
-            payload2 = dict(payload)
-            payload2.pop("googleCloudServiceKey", None)
-            payload2.pop("googleCloudBucketName", None)
-            payload2["returnOnlyInfo"] = True
+        # If uploader complaining and we had tried GCS, retry once with info-only
+        if "uploader" in msg.lower() and payload.get("uploadTo") == "gcs":
+            log.info("Retrying Apify with uploadTo='none' and returnOnlyInfo=True…")
+            payload_retry = dict(payload)
+            payload_retry["uploadTo"] = "none"
+            payload_retry["returnOnlyInfo"] = True
+            payload_retry.pop("googleCloudServiceKey", None)
+            payload_retry.pop("googleCloudBucketName", None)
             try:
-                run_obj = _apify_post(f"{act_base}/runs?token={token}&waitForFinish={wait_for_finish}", payload2, timeout=90).json()
-                if (run_obj.get("status") or "").upper() not in ("SUCCEEDED",):
-                    run_obj = _apify_poll_run(APIFY_ACTOR, run_obj.get("id"), token, poll_timeout_ms, poll_interval_ms)
+                rr = requests.post(f"{act_base}/runs?token={token}&waitForFinish={wait_for_finish}",
+                                   json=payload_retry, timeout=90)
+                if rr.status_code >= 400:
+                    log.error("Apify retry start HTTP %s. Body: %s", rr.status_code, (rr.text or "")[:1000])
+                    return None
+                run_retry = rr.json()
+                if (run_retry.get("status") or "").upper() not in ("SUCCEEDED",):
+                    run_retry = _apify_poll_run(actor_slug, run_retry.get("id"), token, poll_timeout_ms, poll_interval_ms)
+                if (run_retry.get("status") or "").upper() != "SUCCEEDED":
+                    log.error("Apify retry still failed: %s", run_retry)
+                    return None
+                run_obj = run_retry
             except Exception as e:
-                log.error("Apify retry failed: %s", e)
-                return None
-            if (run_obj.get("status") or "").upper() != "SUCCEEDED":
-                log.error("Apify retry still failed.")
+                log.error("Apify retry failed: %s", repr(e))
                 return None
         else:
             return None
@@ -369,10 +384,10 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
     ds_id = run_obj.get("defaultDatasetId")
     kv_id = run_obj.get("defaultKeyValueStoreId")
 
+    # Get items from dataset or OUTPUT record
     items = _apify_fetch_dataset_items(ds_id, token) if ds_id else []
     if not items and kv_id:
         out = _apify_fetch_output_record(kv_id, token)
-        # OUTPUT may be a single object; normalize to list for the same picker
         items = [out] if isinstance(out, dict) else (out or [])
 
     audio_url = _pick_audio_url_from_items(items)
@@ -380,7 +395,7 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
         log.error("Apify: no audio URL found in dataset/OUTPUT.")
         return None
 
-    # Download the audio to local mp3 path
+    # Download returned audio
     out_path = output_dir / f"{base_filename}.mp3"
     try:
         with requests.get(audio_url, stream=True, timeout=300) as r:
@@ -404,6 +419,7 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
         log.error("Apify: error downloading returned audio URL: %s", e)
 
     return None
+
 
 def _apify_ytdl_fallback(
     url: str,
@@ -572,7 +588,17 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     Downloads audio from a given URL using yt-dlp with resilient fallbacks.
     Immediately triggers Apify fallback on first region-lock error.
     """
-    import base64
+    import base64    
+    
+    proxy_url = os.getenv("YTDLP_PROXY_URL", "").strip()
+    if not proxy_url:
+        # Build from Apify Proxy creds if present (same format as Apify docs)
+        ap_pw = os.getenv("APIFY_PROXY_PASSWORD", "").strip()
+        ap_cty = os.getenv("APIFY_PROXY_COUNTRY", os.getenv("APIFY_PROXY_COUNTRY", "US")).strip()
+        if ap_pw:
+            proxy_url = f"http://auto:{ap_pw}@proxy.apify.com:8000/?country={ap_cty}"
+    if proxy_url:
+        enrich += ["--proxy", proxy_url]
 
     # Sanity: yt-dlp + ffmpeg present?
     if not YT_DLP_PATH:
@@ -801,6 +827,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
 
 
 
