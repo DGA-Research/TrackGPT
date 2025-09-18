@@ -40,8 +40,7 @@ if apify_pw and not proxy_url:
     proxy_url = f"http://DGA_Scrapes:{apify_pw}@proxy.apify.com:8000/?country={apify_country}"
     log.info("Using Apify Proxy for yt-dlp with country=%s", apify_country)
 
-# When building the CLI args:
-enrich = []
+
 # ... UA / headers here ...
 if proxy_url:
     enrich += ["--proxy", proxy_url]
@@ -589,12 +588,14 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     Immediately triggers Apify fallback on first region-lock error.
     """
     import base64    
+
+    enrich: list[str] = []
     
+    # Proxy first (so it survives later additions)
     proxy_url = os.getenv("YTDLP_PROXY_URL", "").strip()
     if not proxy_url:
-        # Build from Apify Proxy creds if present (same format as Apify docs)
         ap_pw = os.getenv("APIFY_PROXY_PASSWORD", "").strip()
-        ap_cty = os.getenv("APIFY_PROXY_COUNTRY", os.getenv("APIFY_PROXY_COUNTRY", "US")).strip()
+        ap_cty = os.getenv("APIFY_PROXY_COUNTRY", "US").strip()
         if ap_pw:
             proxy_url = f"http://auto:{ap_pw}@proxy.apify.com:8000/?country={ap_cty}"
     if proxy_url:
@@ -702,7 +703,6 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         }
 
     # --- Build base yt-dlp command once ---
-    enrich: list[str] = []
     if user_agent:
         enrich += [
             "--user-agent", user_agent,
@@ -827,6 +827,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
 
 
 
