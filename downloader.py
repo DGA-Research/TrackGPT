@@ -248,22 +248,43 @@ def _apify_fetch_output_record(kv_id: str, token: str) -> dict:
 
 def _apify_poll_run(actor: str, run_id: str, token: str,
                     poll_timeout_ms: int, poll_interval_ms: int) -> dict:
-    """Poll correct run endpoint until finished."""
     deadline = time.time() + (poll_timeout_ms / 1000.0)
-    # per docs you can poll either /actor-runs/{id} or /acts/{actor}/runs/{id}
-    run_url = f"https://api.apify.com/v2/acts/{actor}/runs/{run_id}?token={token}"
+    # primary endpoint
+    run_url_acts = f"https://api.apify.com/v2/acts/{actor}/runs/{run_id}?token={token}"
+    # fallback endpoint used by some clients / older docs
+    run_url_legacy = f"https://api.apify.com/v2/actor-runs/{run_id}?token={token}"
+
     last = {}
     while time.time() < deadline:
         try:
-            r = _apify_get(run_url, timeout=30)
-            last = r.json()
-            status = (last.get("status") or "").upper()
+            r = _apify_get(run_url_acts, timeout=30)
+            j = _apify_unwrap(r.json())                # NEW
+            last = j
+            status = (j.get("status") or "").upper()
             if status in ("SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"):
-                return last
+                return j
         except requests.HTTPError as e:
-            log.debug("Apify run poll error: %s", e)
+            # If the new endpoint 404s for any reason, try the legacy one
+            try:
+                r = _apify_get(run_url_legacy, timeout=30)
+                j = _apify_unwrap(r.json())            # NEW
+                last = j
+                status = (j.get("status") or "").upper()
+                if status in ("SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"):
+                    return j
+            except Exception as ee:
+                log.debug("Apify legacy poll failed: %s", ee)
+
         time.sleep(max(0.5, poll_interval_ms / 1000.0))
-    return last  # may still be RUNNING
+    return last
+
+
+# put this helper near your other utils (top of file is fine)
+def _apify_unwrap(obj: dict) -> dict:
+    """Apify sometimes returns {data: {...}}. Unwrap to the inner dict."""
+    if isinstance(obj, dict) and isinstance(obj.get("data"), dict):
+        return obj["data"]
+    return obj
 
 
 def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Optional[Tuple[str, Dict[str, Any]]]:
@@ -283,7 +304,7 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
 
     # Build base payload (per actor input schema)
     payload: dict[str, Any] = {
-        "videos": [{"url": url}],                   # <-- object list, not just strings
+        "videos": [{"url": url}],
         "preferredFormat": "mp3",
         "useApifyProxy": True,
         "proxyCountry": os.getenv("APIFY_PROXY_COUNTRY", "US"),
@@ -294,20 +315,20 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
     gcs_key_raw = os.getenv("APIFY_GCS_SERVICE_JSON", "").strip()
     gcs_bucket  = os.getenv("APIFY_GCS_BUCKET", "").strip()
     if gcs_key_raw and gcs_bucket:
-        payload["uploadTo"] = "gcs"                # <-- explicitly select uploader section
-            # IMPORTANT: googleCloudServiceKey must be a STRING (the JSON), not an object
+        payload["uploadTo"] = "gcs"
+        # googleCloudServiceKey must be a STRING containing the JSON
         payload["googleCloudServiceKey"] = gcs_key_raw
         payload["googleCloudBucketName"] = gcs_bucket
     else:
         payload["uploadTo"] = "none"
-        payload["returnOnlyInfo"] = True           # avoid “select an uploader…” error
+        payload["returnOnlyInfo"] = True
 
     # Time controls (tweak via env)
     wait_for_finish = int(os.getenv("APIFY_WAIT_FOR_FINISH_SECS", "60"))
     poll_timeout_ms = int(os.getenv("APIFY_POLL_TIMEOUT_MS", "600000"))  # 10 min
     poll_interval_ms = int(os.getenv("APIFY_POLL_INTERVAL_MS", "3000"))
 
-    # Start the actor run (server-side will wait up to wait_for_finish seconds)
+    # Start the actor run
     actor_slug = os.getenv("APIFY_ACTOR", "streamers~youtube-video-downloader")
     act_base = f"https://api.apify.com/v2/acts/{actor_slug}"
 
@@ -316,11 +337,11 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
         log.info("Apify fallback: start run (payload keys=%s)", list(payload.keys()))
         r = requests.post(start_url, json=payload, timeout=90)
         if r.status_code >= 400:
-            # Better diagnostics even if response is missing
             body = (r.text or "").strip()
             log.error("Apify start HTTP %s. Body: %s", r.status_code, body[:1000])
             return None
-        run_obj = r.json()
+        start_json = r.json()
+        run_obj = _apify_unwrap(start_json)                 # <-- FIX #1: unwrap
     except Exception as e:
         log.error("Apify start failed: %s", repr(e))
         return None
@@ -328,18 +349,19 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
     status = (run_obj.get("status") or "").upper()
     run_id = run_obj.get("id")
     if not run_id:
-        log.error("Apify start: missing run id in response: %s", run_obj)
+        log.error("Apify start: missing run id in response: %s", start_json)
         return None
 
-    # If RUNNING, poll the proper run endpoint until done
+    # If not terminal, poll until done
     if status not in ("SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"):
-        run_obj = _apify_poll_run(actor_slug, run_id, token, poll_timeout_ms, poll_interval_ms)
+        polled = _apify_poll_run(actor_slug, run_id, token, poll_timeout_ms, poll_interval_ms)
+        run_obj = _apify_unwrap(polled)                     # <-- FIX #3: unwrap after polling
         status = (run_obj.get("status") or "").upper()
 
     if status != "SUCCEEDED":
         msg = run_obj.get("statusMessage") or run_obj.get("errorMessage") or "Unknown error"
         log.error("Apify run FAILED (status=%s, id=%s, msg=%s)", status, run_id, msg)
-        # If uploader complaining and we had tried GCS, retry once with info-only
+        # Retry once in "info-only" mode if uploader was the issue
         if "uploader" in msg.lower() and payload.get("uploadTo") == "gcs":
             log.info("Retrying Apify with uploadTo='none' and returnOnlyInfo=True…")
             payload_retry = dict(payload)
@@ -353,9 +375,11 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
                 if rr.status_code >= 400:
                     log.error("Apify retry start HTTP %s. Body: %s", rr.status_code, (rr.text or "")[:1000])
                     return None
-                run_retry = rr.json()
+                run_retry_json = rr.json()
+                run_retry = _apify_unwrap(run_retry_json)   # <-- unwrap retry start
                 if (run_retry.get("status") or "").upper() not in ("SUCCEEDED",):
-                    run_retry = _apify_poll_run(actor_slug, run_retry.get("id"), token, poll_timeout_ms, poll_interval_ms)
+                    polled_retry = _apify_poll_run(actor_slug, run_retry.get("id"), token, poll_timeout_ms, poll_interval_ms)
+                    run_retry = _apify_unwrap(polled_retry) # <-- unwrap retry poll
                 if (run_retry.get("status") or "").upper() != "SUCCEEDED":
                     log.error("Apify retry still failed: %s", run_retry)
                     return None
@@ -366,7 +390,8 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
         else:
             return None
 
-    ds_id = run_obj.get("defaultDatasetId")
+    # Read dataset & KV IDs from the (possibly unwrapped) run object
+    ds_id = run_obj.get("defaultDatasetId")                 # <-- FIX #3 uses unwrapped run_obj
     kv_id = run_obj.get("defaultKeyValueStoreId")
 
     # Get items from dataset or OUTPUT record
@@ -383,10 +408,10 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
     # Download returned audio
     out_path = output_dir / f"{base_filename}.mp3"
     try:
-        with requests.get(audio_url, stream=True, timeout=300) as r:
-            r.raise_for_status()
+        with requests.get(audio_url, stream=True, timeout=300) as resp:
+            resp.raise_for_status()
             with open(out_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=1024 * 256):
+                for chunk in resp.iter_content(chunk_size=1024 * 256):
                     if chunk:
                         f.write(chunk)
         if out_path.exists() and out_path.stat().st_size > 0:
@@ -813,6 +838,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
 
 
 
