@@ -194,6 +194,73 @@ if not FFMPEG_PATH:
     sys.exit(1)
 
 
+
+def _apify_try_gcs_pull(url: str, output_dir: Path, base_filename: str) -> Optional[str]:
+    import json
+    try:
+        from google.cloud import storage
+        from google.oauth2 import service_account
+    except Exception as e:
+        log.error("google-cloud-storage not available: %s", e)
+        return None
+
+    gcs_json = os.getenv("APIFY_GCS_SERVICE_JSON", "").strip()
+    bucket_name = os.getenv("APIFY_GCS_BUCKET", "").strip()
+    if not gcs_json or not bucket_name:
+        log.info("GCS env vars missing; skipping GCS lookup.")
+        return None
+
+    # Build creds from the JSON string (no local file needed)
+    try:
+        info = json.loads(gcs_json)
+        creds = service_account.Credentials.from_service_account_info(info)
+        client = storage.Client(project=info.get("project_id"), credentials=creds)
+        bucket = client.bucket(bucket_name)
+    except Exception as e:
+        log.error("GCS init failed: %s", e)
+        return None
+
+    # ----- search strategy -----
+    video_id = _extract_youtube_id(url)
+    candidates = [f"{base_filename}.mp3"]
+    if video_id:
+        candidates += [f"{video_id}.mp3", f"{video_id}_{base_filename}.mp3"]
+
+    # 1) exact-name hits
+    for name in candidates:
+        blob = bucket.blob(name)
+        try:
+            if blob.exists(client):
+                return _gcs_download(blob, output_dir, base_filename)
+        except Exception:
+            pass
+
+    # 2) prefix search by base_filename
+    for blob in client.list_blobs(bucket_name, prefix=base_filename):
+        if blob.name.lower().endswith(".mp3"):
+            return _gcs_download(blob, output_dir, base_filename)
+
+    # 3) fallback: newest *.mp3 in bucket
+    newest = None
+    for blob in client.list_blobs(bucket_name):
+        if blob.name.lower().endswith(".mp3"):
+            if newest is None or (getattr(blob, "updated", None) and blob.updated > newest.updated):
+                newest = blob
+    if newest:
+        return _gcs_download(newest, output_dir, base_filename)
+
+    log.error("GCS lookup failed to find a matching audio object.")
+    return None
+
+def _gcs_download(blob, output_dir: Path, base_filename: str) -> str:
+    out_path = output_dir / f"{base_filename}.mp3"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    blob.download_to_filename(out_path)
+    log.info("Pulled from GCS: gs://%s/%s → %s", blob.bucket.name, blob.name, out_path)
+    return str(out_path)
+
+
+
 # ---------- Shared helpers ----------
 
 def _ensure_utf8_netscape(cookie_path: str, temp_list: List[str]) -> str:
@@ -990,25 +1057,3 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
