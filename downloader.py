@@ -643,11 +643,11 @@ def _apify_ytdl_fallback(
             # Otherwise fall back to a video download we can convert
             if not best_audio_url:
                 for d in downloads:
-                f = (d.get("format") or "").lower()
-                u = d.get("url")
-                if u and (f in ("mp4", "webm") or "video" in (d.get("type") or "").lower()):
-                    best_video_url = u
-                    break
+                    f = (d.get("format") or "").lower()
+                    u = d.get("url")
+                    if u and (f in ("mp4", "webm") or "video" in (d.get("type") or "").lower()):
+                        best_video_url = u
+                        break
 
             # Try common flat fields some actor versions emit
             if not best_audio_url:
@@ -990,6 +990,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if last_err:
         log.error("Last error: %s", last_err)
     return None
+
 
 
 
