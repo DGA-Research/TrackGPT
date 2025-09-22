@@ -213,6 +213,7 @@ if check_password():
                                 )
                                 st.session_state.metadata.update(metadata_update or {})
                                 st.session_state.audio_path = audio_path_str
+                                audio_path = audio_path_str          
                             else:
                                 st.error("Only YouTube links are enabled. Turn on “Allow non-YouTube links” to proceed.")
                                 st.stop()
@@ -231,11 +232,10 @@ if check_password():
                     if transcript_input:
                         transcript = transcript_input
                     else:
+                        audio_path = audio_path or st.session_state.get("audio_path")  # ← add this line (optional but helpful)
                         if not audio_path:
                             raise ValueError("No audio source available to transcribe.")
-                        # transcribe_file expects a path to audio
                         transcript = transcribe_file(audio_path, OPENAI_API_KEY, ASSEMBLYAI_API_KEY, target_name)
-
                     # --- Format transcript HTML ---
                     transcript = re.sub(r'(\[\d+:\d+:\d+\] Speaker [A-Z])', r'</p><p>\1', transcript)
                     transcript = '<p>' + transcript.strip() + '</p>'
