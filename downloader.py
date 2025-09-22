@@ -174,7 +174,14 @@ if not FFMPEG_PATH:
     sys.exit(1) # Exit if ffmpeg is not found
 
 # --- Core Function ---
-def download_audio(url: str, output_dir: Path, base_filename: str, type_input, allow_non_yt_override: bool | None = None):
+def download_audio(
+    url: str,
+    output_dir: Path,
+    base_filename: str,
+    type_input,
+    allow_non_yt_override: bool | None = None,   # existing from your Option B
+    use_proxy_override: bool | None = None       # NEW
+) -> Optional[Tuple[str, Dict[str, Any]]]:
     """
     Downloads audio from a given URL using yt-dlp with resilient fallbacks.
     For non-YouTube links we take a generic path; for YouTube we run a ladder.
@@ -183,14 +190,22 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input, a
     metadata: Dict[str, Any] = {}
     
     # ---- Proxy first ----
-    proxy_url = os.getenv("YTDLP_PROXY_URL", "").strip()
-    if not proxy_url:
-        ap_pw = os.getenv("APIFY_PROXY_PASSWORD", "").strip()
-        ap_cty = os.getenv("APIFY_PROXY_COUNTRY", "US").strip()
-        if ap_pw:
-            proxy_url = f"http://auto:{ap_pw}@proxy.apify.com:8000/?country={ap_cty}"
-    if proxy_url:
-        enrich += ["--proxy", proxy_url]
+    # --- Decide whether to use a proxy (NEW logic) ---
+    # Default: OFF for non-YouTube, unless explicitly enabled by override.
+    # We still *allow* a pre-set YTDLP_PROXY_URL when override is True.
+    proxy_url_env = os.getenv("YTDLP_PROXY_URL", "").strip()
+
+    # Apify creds can construct a proxy URL if desired; we only use them when override is True
+    ap_pw = os.getenv("APIFY_PROXY_PASSWORD", "").strip()
+    ap_cty = os.getenv("APIFY_PROXY_COUNTRY", "US").strip()
+    apify_proxy_candidate = f"http://auto:{ap_pw}@proxy.apify.com:8000/?country={ap_cty}" if ap_pw else ""
+
+    # Final decision:
+    use_proxy = bool(use_proxy_override)  # if None -> False (off by default)
+    proxy_url = ""
+    if use_proxy:
+        proxy_url = proxy_url_env or apify_proxy_candidate  # prefer explicit env, else Apify
+
 
     # ---- Sanity: binaries ----
     if not YT_DLP_PATH:
@@ -268,56 +283,60 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input, a
 
     # --- Early branch for non-YouTube hosts ---
     if not _looks_like_youtube(url):
-        # NEW: require switch
+        allow_non_yt_env = os.getenv("ALLOW_NON_YT", "0").lower() in ("1", "true", "yes")
+        allow_non_yt = allow_non_yt_env if allow_non_yt_override is None else bool(allow_non_yt_override)
         if not allow_non_yt:
-            log.info("Non-YouTube URL blocked by config")
+            log.info("Non-YouTube URL blocked by config; set ALLOW_NON_YT=1 to enable.")
             raise ValueError("Non-YouTube URLs are disabled. Paste a YouTube link or enable ALLOW_NON_YT.")
 
-        # existing code…
-        proxy_url = os.getenv("YTDLP_PROXY_URL", "").strip()
-        if not proxy_url:
-            ap_pw = os.getenv("APIFY_PROXY_PASSWORD", "").strip()
-            ap_cty = os.getenv("APIFY_PROXY_COUNTRY", "US").strip()
-            if ap_pw:
-                proxy_url = f"http://auto:{ap_pw}@proxy.apify.com:8000/?country={ap_cty}"
 
-        # Before calling _download_non_youtube(...)
+        # QUICK PROBE (download=False) using same headers/cookies/proxy to fail fast if unsupported
+        probe_opts = {"quiet": True, "no_warnings": True, "socket_timeout": 15}
+        # headers
+        headers = {}
+        if user_agent:
+            headers["User-Agent"] = user_agent
+            headers["Accept-Language"] = "en-US,en;q=0.9"
         try:
-            import yt_dlp
-            # Build headers like the real run
-            probe_opts = {"quiet": True, "no_warnings": True, "socket_timeout": 15}
-            headers = {}
-            if user_agent:
-                headers["User-Agent"] = user_agent
-                headers["Accept-Language"] = "en-US,en;q=0.9"
-            try:
-                u = urlsplit(url)
-                origin = f"{u.scheme}://{u.netloc}/"
-                headers["Referer"] = origin
-            except Exception:
-                pass
-            if headers:
-                probe_opts["http_headers"] = headers
+            u = urlsplit(url)
+            headers["Referer"] = f"{u.scheme}://{u.netloc}/"
+        except Exception:
+            pass
+        if headers:
+            probe_opts["http_headers"] = headers
 
-            if temp_cookies_file:
-                probe_opts["cookiefile"] = temp_cookies_file
-            elif cookies_from_browser:
-                probe_opts["cookiesfrombrowser"] = cookies_from_browser
-            if proxy_url:
-                probe_opts["proxy"] = proxy_url
+         # cookies
+        if temp_cookies_file:
+            probe_opts["cookiefile"] = temp_cookies_file
+        elif cookies_from_browser:
+            probe_opts["cookiesfrombrowser"] = cookies_from_browser
 
+        # proxy (only if user enabled)
+        if proxy_url:
+            probe_opts["proxy"] = proxy_url
+
+        try:
             with yt_dlp.YoutubeDL(probe_opts) as ydl:
                 ydl.extract_info(url, download=False)
+        except Exception as e:
+            _cleanup_temp_cookies()
+            raise ValueError(
+                f"This site isn’t supported by yt-dlp (or needs login/cookies). Detail: {e}"
+            )
 
-        return _download_non_youtube(
-            url,
-            output_dir,
-            base_filename,
-            user_agent=getattr(Config, "YTDLP_USER_AGENT", ""),
-            cookies_from_browser=getattr(Config, "YTDLP_COOKIES_FROM_BROWSER", ""),
-            proxy_url=proxy_url,
-            metadata=metadata,
-        )
+        try:
+            res = _download_non_youtube(
+                url,
+                output_dir,
+                base_filename,
+                user_agent=user_agent,
+                cookies_from_browser=cookies_from_browser,
+                proxy_url=proxy_url,     # <- only set if checkbox was enabled
+                 metadata=metadata,
+            )
+            return res
+        finally:
+            _cleanup_temp_cookies()
 
 
     
@@ -1286,6 +1305,7 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
+
 
 
 
