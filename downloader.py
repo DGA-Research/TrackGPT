@@ -260,14 +260,14 @@ if not FFMPEG_PATH:
     sys.exit(1) # Exit if ffmpeg is not found
 
 # --- Core Function ---
-def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -> Optional[Tuple[str, Dict[str, Any]]]:
+def download_audio(url: str, output_dir: Path, base_filename: str, type_input, allow_non_yt_override: bool | None = None):
     """
     Downloads audio from a given URL using yt-dlp with resilient fallbacks.
     For non-YouTube links we take a generic path; for YouTube we run a ladder.
     """
     enrich: list[str] = []
     metadata: Dict[str, Any] = {}
-
+    
     # ---- Proxy first ----
     proxy_url = os.getenv("YTDLP_PROXY_URL", "").strip()
     if not proxy_url:
@@ -349,13 +349,14 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     if user_agent:
         ydl_opts['user_agent'] = user_agent
 
-    allow_non_yt = os.getenv("ALLOW_NON_YT", "0").lower() in ("1", "true", "yes")
+    allow_non_yt_env = os.getenv("ALLOW_NON_YT", "0").lower() in ("1", "true", "yes")
+    allow_non_yt = allow_non_yt_env if allow_non_yt_override is None else bool(allow_non_yt_override)
 
     # --- Early branch for non-YouTube hosts ---
     if not _looks_like_youtube(url):
         # NEW: require switch
         if not allow_non_yt:
-            log.info("Non-YouTube URL blocked by config; set ALLOW_NON_YT=1 to enable.")
+            log.info("Non-YouTube URL blocked by config")
             raise ValueError("Non-YouTube URLs are disabled. Paste a YouTube link or enable ALLOW_NON_YT.")
 
         # existing code…
@@ -1354,6 +1355,7 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
+
 
 
 
