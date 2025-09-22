@@ -7,12 +7,19 @@ from docx import Document
 import io
 from html2docx import html2docx
 
+from urllib.parse import urlsplit
+
 import os
 
 import logging
 log = logging.getLogger(__name__)
 
-
+def is_youtube(u: str) -> bool:
+    try:
+        host = urlsplit(u).netloc.lower()
+        return ("youtube.com" in host) or ("youtu.be" in host) or ("youtube-nocookie.com" in host)
+    except Exception:
+        return False
 
 level = os.getenv("LOGLEVEL", "INFO").upper()
 logging.basicConfig(
@@ -20,6 +27,7 @@ logging.basicConfig(
     format="%(levelname)s:%(name)s:%(message)s"
 )
 
+allow_non_youtube = st.checkbox("Allow non-YouTube links", value=False, help="Uncheck to only accept YouTube URLs")
 
 st.caption("Optional: provide YouTube cookies for sign-in/consent/region-locked videos.")
 cookies_file = st.file_uploader("Upload cookies.txt", type=["txt"])
@@ -179,17 +187,15 @@ if check_password():
             with st.spinner("Processing input..."):
                 try:
                     # Handle different input types
-                    if video_url:
-                        audio_str, metadata_update = download_audio(video_url, output_dir, base_filename, type_input)
-                        st.session_state.metadata.update(metadata_update)
-                        audio_path = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
-                        st.session_state.audio_path = str(audio_path)
-                    elif uploaded_file:
-                        audio_str = uploaded_file
-                        st.session_state.audio_path = uploaded_file
-                    else:
-                        audio_str = None
-                        st.session_state.audio_path = None
+                   if video_url:
+                        if is_youtube(video_url) or allow_non_youtube:
+                            metadata_update = download_audio(video_url, output_dir, base_filename, type_input)
+                            st.session_state.metadata.update(metadata_update)
+                            audio_path = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
+                            st.session_state.audio_path = str(audio_path)
+                        else:
+                            st.error("Only YouTube links are enabled. Turn on “Allow non-YouTube links” to proceed.")
+                            st.stop()
                     
                     # Get transcript
                     if transcript_input:
