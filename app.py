@@ -33,6 +33,13 @@ allow_non_youtube = st.checkbox(
     help="Uncheck to only accept YouTube URLs"
 )
 
+# NEW: proxy toggle for non-YouTube
+use_proxy_for_non_yt = st.checkbox(
+    "Use proxy for non-YouTube links",
+    value=False,
+    help="Only enable if the site is geo/region locked or your network blocks it"
+)
+
 st.caption("Optional: provide YouTube cookies for sign-in/consent/region-locked videos.")
 cookies_file = st.file_uploader("Upload cookies.txt", type=["txt"])
 if cookies_file is not None:
@@ -195,17 +202,20 @@ if check_password():
 
                     # A) URL input
                     if video_url:
-                        if is_youtube(video_url) or allow_non_youtube:
-                            audio_path_str, metadata_update = download_audio(
-                                video_url, output_dir, base_filename, type_input, allow_non_yt_override=allow_non_youtube
-                            )
-                            # persist metadata and audio path
-                            st.session_state.metadata.update(metadata_update or {})
-                            st.session_state.audio_path = audio_path_str
-                            audio_path = audio_path_str
-                        else:
-                            st.error("Only YouTube links are enabled. Turn on “Allow non-YouTube links” to proceed.")
-                            st.stop()
+                            if is_youtube(video_url) or allow_non_youtube:
+                                audio_path_str, metadata_update = download_audio(
+                                    video_url,
+                                    output_dir,
+                                    base_filename,
+                                    type_input,
+                                    allow_non_yt_override=allow_non_youtube,          # existing flag
+                                    use_proxy_override=use_proxy_for_non_yt           # NEW flag
+                                )
+                                st.session_state.metadata.update(metadata_update or {})
+                                st.session_state.audio_path = audio_path_str
+                            else:
+                                st.error("Only YouTube links are enabled. Turn on “Allow non-YouTube links” to proceed.")
+                                st.stop()
 
                     # B) Uploaded file
                     elif uploaded_file:
