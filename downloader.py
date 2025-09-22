@@ -83,10 +83,20 @@ def _download_non_youtube(
     ] + hdrs
 
     import subprocess, os
-    subproc_timeout_s = int(os.getenv("YTDLP_SUBPROC_TIMEOUT_S", "240"))
+    dur = 0
+    try:
+        dur = int((metadata or {}).get("duration") or 0)
+    except Exception:
+        dur = 0
 
-    logging.info("Non-YouTube URL detected; using generic download path.")
-    logging.debug("yt-dlp (non-yt) command: %s", " ".join(cmd))
+    # allow env override; otherwise scale with duration
+    subproc_timeout_s = int(os.getenv("YTDLP_SUBPROC_TIMEOUT_S", "0")) or max(300, dur * 2 + 120)
+    logging.info("Non-YT timeout: %ss (duration=%ss)", subproc_timeout_s, dur)
+
+
+
+    log.info("Non-YT timeout = %ss (duration=%s)", subproc_timeout_s, (metadata or {}).get("duration"))
+
     try:
         cp = subprocess.run(
             cmd,
@@ -206,6 +216,7 @@ def download_audio(
     if use_proxy:
         proxy_url = proxy_url_env or apify_proxy_candidate  # prefer explicit env, else Apify
 
+    log.info("Proxy (YT ladder) = %s", proxy_url or "none")
 
     # ---- Sanity: binaries ----
     if not YT_DLP_PATH:
@@ -399,6 +410,9 @@ def download_audio(
     elif cookies_from_browser:
         enrich += ["--cookies-from-browser", cookies_from_browser]
 
+    if proxy_url:
+        enrich += ["--proxy", proxy_url]
+        
     base_cmd = [
         YT_DLP_PATH, url,
         "-x", "--audio-format", Config.AUDIO_FORMAT,
@@ -1305,6 +1319,7 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
+
 
 
 
