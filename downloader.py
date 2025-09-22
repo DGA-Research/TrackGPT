@@ -199,9 +199,8 @@ def download_audio(
     output_dir: Path,
     base_filename: str,
     type_input,
-    allow_non_yt_override: bool | None = None,
-    use_proxy_override: bool | None = None,
-    force_apify: bool = False,              # ← NEW
+    allow_non_yt_override: bool | None = None,   # existing from your Option B
+    use_proxy_override: bool | None = None       # NEW
 ) -> Optional[Tuple[str, Dict[str, Any]]]:
     """
     Downloads audio from a given URL using yt-dlp with resilient fallbacks.
@@ -209,30 +208,6 @@ def download_audio(
     """
     enrich: list[str] = []
     metadata: Dict[str, Any] = {}
-
-
-    if force_apify:
-        log.info("Force-Apify enabled; skipping yt-dlp and invoking Apify directly.")
-        # Optional: quick, non-downloading probe for duration (helps set a smart timeout),
-        # but OK to skip if you truly want zero yt-dlp touch.
-        expected_duration = None
-        try:
-            import yt_dlp
-            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
-                info = ydl.extract_info(url, download=False)
-                if info.get("_type") == "playlist" and info.get("entries"):
-                    info = info["entries"][0]
-                expected_duration = int(info.get("duration") or 0) or None
-        except Exception:
-            pass  # fall back to generous default in the Apify helper
-
-        ap = _apify_download_audio(url, output_dir, base_filename, expected_duration=expected_duration)
-        if ap:
-            ap_path, ap_meta = ap
-            return (ap_path, {**metadata, **ap_meta, "download_attempt": "apify_forced"})
-    # If Apify fails, surface a clear error instead of silently falling into yt-dlp
-        raise RuntimeError("Apify path failed while force_apify=True.")
-
     
     # ---- Proxy first ----
     # --- Decide whether to use a proxy (NEW logic) ---
@@ -1368,8 +1343,6 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
-
-
 
 
 
