@@ -27,7 +27,11 @@ logging.basicConfig(
     format="%(levelname)s:%(name)s:%(message)s"
 )
 
-allow_non_youtube = st.checkbox("Allow non-YouTube links", value=False, help="Uncheck to only accept YouTube URLs")
+allow_non_youtube = st.checkbox(
+    "Allow non-YouTube links",
+    value=False,
+    help="Uncheck to only accept YouTube URLs"
+)
 
 st.caption("Optional: provide YouTube cookies for sign-in/consent/region-locked videos.")
 cookies_file = st.file_uploader("Upload cookies.txt", type=["txt"])
@@ -186,60 +190,69 @@ if check_password():
             # Process the input
             with st.spinner("Processing input..."):
                 try:
-                    # Handle different input types
-                   if video_url:
+                    # --- Handle audio source selection ---
+                    audio_path = None
+
+                    # A) URL input
+                    if video_url:
                         if is_youtube(video_url) or allow_non_youtube:
-                            metadata_update = download_audio(video_url, output_dir, base_filename, type_input)
-                            st.session_state.metadata.update(metadata_update)
-                            audio_path = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
-                            st.session_state.audio_path = str(audio_path)
+                            audio_path_str, metadata_update = download_audio(
+                                video_url, output_dir, base_filename, type_input
+                            )
+                            # persist metadata and audio path
+                            st.session_state.metadata.update(metadata_update or {})
+                            st.session_state.audio_path = audio_path_str
+                            audio_path = audio_path_str
                         else:
                             st.error("Only YouTube links are enabled. Turn on “Allow non-YouTube links” to proceed.")
                             st.stop()
-                    
-                    # Get transcript
+
+                    # B) Uploaded file
+                    elif uploaded_file:
+                        # Save uploaded file to the output dir with a safe name
+                        upload_ext = Path(uploaded_file.name).suffix.lower() or ".mp3"
+                        dest = output_dir / f"{base_filename}{upload_ext}"
+                        with open(dest, "wb") as f:
+                            f.write(uploaded_file.read())
+                        st.session_state.audio_path = str(dest)
+                        audio_path = str(dest)
+
+                    # --- Transcript handling ---
                     if transcript_input:
                         transcript = transcript_input
                     else:
-                        transcript = transcribe_file(audio_str, OPENAI_API_KEY, ASSEMBLYAI_API_KEY, target_name)
-                    
-                    # Format transcript for HTML and add breaks between each speaker/time stamp
+                        if not audio_path:
+                            raise ValueError("No audio source available to transcribe.")
+                        # transcribe_file expects a path to audio
+                        transcript = transcribe_file(audio_path, OPENAI_API_KEY, ASSEMBLYAI_API_KEY, target_name)
+
+                    # --- Format transcript HTML ---
                     transcript = re.sub(r'(\[\d+:\d+:\d+\] Speaker [A-Z])', r'</p><p>\1', transcript)
                     transcript = '<p>' + transcript.strip() + '</p>'
-                    
-                    # Set pattern used to identify speaker labels 
+
+                    # --- Extract speaker labels for editor ---
                     pattern = r'\[[\d:.]+\]\s+(Speaker\s+[A-Z])\s+\(([^)]+)\):'
                     matches = re.findall(pattern, transcript)
-                    
-                    # Create two sets to store a list of speakers in transcript
-                    unique_speakers = set()
-                    # Create another set to use as the text for the speaker editor
-                    unique_speakers_edit = set()
-                    
-                    # Format each speaker and add to set (duplicates ignored)
-                    for speaker_id, name in matches:
-                        formatted_speaker = f"{speaker_id} ({name})"
-                        unique_speakers.add(formatted_speaker)
-                    
-                    # Convert to sorted list so speakers appear in consistent order
-                    speaker_list = sorted(list(unique_speakers))
 
-                    # Format set used for speaker editing
+                    unique_speakers = set()
+                    unique_speakers_edit = set()
+
                     for speaker_id, name in matches:
-                        formatted_speaker = f"{speaker_id}: {name}"
-                        unique_speakers_edit.add(formatted_speaker)
-                    
-                    # Convert to sorted list so speakers appear in consistent order
-                    speaker_list_text = sorted(list(unique_speakers_edit))
-                    
+                        unique_speakers.add(f"{speaker_id} ({name})")
+                        unique_speakers_edit.add(f"{speaker_id}: {name}")
+
+                    speaker_list = sorted(unique_speakers)
+                    speaker_list_text = sorted(unique_speakers_edit)
+
                     st.session_state.speaker_list = speaker_list
                     st.session_state.speaker_list_text = speaker_list_text
                     st.session_state.transcript = transcript
                     st.session_state.step = "edit_transcript"
                     st.rerun()
-                    
+
                 except Exception as e:
                     st.error(f"Processing failed: {e}")
+
         
         elif st.session_state.report_type and not target_name:
             st.error("Please enter a Target Name")
