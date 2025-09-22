@@ -29,6 +29,14 @@ from config import Config
 
 from urllib.parse import urlsplit
 
+def _probe_duration_seconds(local_path: str) -> int:
+    # using ffprobe keeps it light and precise
+    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+           "-of", "default=noprint_wrappers=1:nokey=1", local_path]
+    out = subprocess.check_output(cmd, text=True).strip()
+    return int(float(out)) if out else 0
+
+
 def _looks_like_youtube(u: str) -> bool:
     try:
         host = urlsplit(u).netloc.lower()
@@ -83,11 +91,13 @@ def _download_non_youtube(
     ] + hdrs
 
     import subprocess, os
-    dur = 0
-    try:
-        dur = int((metadata or {}).get("duration") or 0)
-    except Exception:
-        dur = 0
+    
+    # after Apify returns and you download the file to verify:
+    dur = _probe_duration_seconds(local_mp3)
+    expected = int((metadata or {}).get("duration") or 0)
+    if expected and dur < int(expected * 0.9):
+        log.error("Apify output too short (%ss < %ss). Will retry via alternate format.", dur, expected)
+        # delete the short artifact from GCS (optional) and go to §4 fallback
 
     # allow env override; otherwise scale with duration
     subproc_timeout_s = int(os.getenv("YTDLP_SUBPROC_TIMEOUT_S", "0")) or max(300, dur * 2 + 120)
@@ -992,18 +1002,32 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
       - optional GCS: googleCloudServiceKey, googleCloudBucketName
     Then pull dataset/KV results and download the audio locally.
     """
+    
+    # inside _apify_download_audio(...)
+    timeout_secs = max(3600, int((metadata or {}).get("duration", 0)) * 2 + 300)
+
+    # build your upload template to be unique per run to avoid stale partials (see §3)
+    file_name_template = f"{base_filename}_apify_{int(time.time())}"
+    
     token = os.getenv("APIFY_TOKEN", "").strip()
     if not token:
         log.warning("APIFY_TOKEN not set; skipping Apify fallback.")
         return None
 
     # Build base payload (per actor input schema)
-    payload: dict[str, Any] = {
+    payload = {
         "videos": [{"url": url}],
-        "preferredFormat": "mp3",
+        "preferredFormat": "251",            # keep your choice, see §4 to vary
         "useApifyProxy": True,
-        "proxyCountry": os.getenv("APIFY_PROXY_COUNTRY", "US"),
-        "fileNameTemplate": base_filename,
+        "proxyCountry": "US",
+        "fileNameTemplate": file_name_template,
+        "uploadTo": "gcs",
+        "googleCloudServiceKey": GCP_KEY_JSON,
+        "googleCloudBucketName": GCS_BUCKET,
+
+        # If the actor supports these as INPUT keys, include them:
+        "maxConcurrency": 1,
+        "requestHandlerTimeoutSecs": timeout_secs,
     }
 
     # If GCS creds present, enable uploading; otherwise return links only
@@ -1319,6 +1343,7 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
+
 
 
 
