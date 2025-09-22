@@ -80,6 +80,9 @@ def _download_non_youtube(
         hdrs += ["--cookies-from-browser", cookies_from_browser]
     if proxy_url:
         hdrs += ["--proxy", proxy_url]
+    elif cookies_file:
+        hdrs += ["--cookies", cookies_file]
+
 
     cmd = [
         YT_DLP_PATH,
@@ -92,16 +95,15 @@ def _download_non_youtube(
 
     import subprocess, os
     
-    # after Apify returns and you download the file to verify:
-    dur = _probe_duration_seconds(local_mp3)
-    expected = int((metadata or {}).get("duration") or 0)
-    if expected and dur < int(expected * 0.9):
-        log.error("Apify output too short (%ss < %ss). Will retry via alternate format.", dur, expected)
-        # delete the short artifact from GCS (optional) and go to §4 fallback
 
-    # allow env override; otherwise scale with duration
-    subproc_timeout_s = int(os.getenv("YTDLP_SUBPROC_TIMEOUT_S", "0")) or max(300, dur * 2 + 120)
-    logging.info("Non-YT timeout: %ss (duration=%ss)", subproc_timeout_s, dur)
+    expected = 0
+    try:
+        expected = int((metadata or {}).get("duration") or 0)
+    except Exception:
+        expected = 0
+
+    subproc_timeout_s = int(os.getenv("YTDLP_SUBPROC_TIMEOUT_S", "0")) or max(600, expected * 2 + 180)
+    log.info("Non-YT timeout = %ss (expected duration=%s)", subproc_timeout_s, expected)
 
 
 
@@ -1047,31 +1049,26 @@ def _apify_download_audio(
     # Build base payload (per actor input schema)
     payload = {
         "videos": [{"url": url}],
-        "preferredFormat": "251",            # keep your choice, see §4 to vary
+        "preferredFormat": "251",
         "useApifyProxy": True,
         "proxyCountry": "US",
         "fileNameTemplate": file_name_template,
-        "uploadTo": "gcs",
-        "googleCloudServiceKey": GCP_KEY_JSON,
-        "googleCloudBucketName": GCS_BUCKET,
-
-        # If the actor supports these as INPUT keys, include them:
+        "uploadTo": "none",                 # set default to none
         "maxConcurrency": 1,
         "requestHandlerTimeoutSecs": timeout_secs,
     }
-
     # If GCS creds present, enable uploading; otherwise return links only
     gcs_key_raw = os.getenv("APIFY_GCS_SERVICE_JSON", "").strip()
     gcs_bucket  = os.getenv("APIFY_GCS_BUCKET", "").strip()
     if gcs_key_raw and gcs_bucket:
         payload["uploadTo"] = "gcs"
-        # googleCloudServiceKey must be a STRING containing the JSON
         payload["googleCloudServiceKey"] = gcs_key_raw
         payload["googleCloudBucketName"] = gcs_bucket
     else:
         payload["uploadTo"] = "none"
         payload["returnOnlyInfo"] = True
 
+    
     # Time controls (tweak via env)
     wait_for_finish = int(os.getenv("APIFY_WAIT_FOR_FINISH_SECS", "60"))
     poll_timeout_ms = int(os.getenv("APIFY_POLL_TIMEOUT_MS", "600000"))  # 10 min
@@ -1373,6 +1370,7 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
+
 
 
 
