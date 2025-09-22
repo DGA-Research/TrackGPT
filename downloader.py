@@ -80,9 +80,6 @@ def _download_non_youtube(
         hdrs += ["--cookies-from-browser", cookies_from_browser]
     if proxy_url:
         hdrs += ["--proxy", proxy_url]
-    elif cookies_file:
-        hdrs += ["--cookies", cookies_file]
-
 
     cmd = [
         YT_DLP_PATH,
@@ -95,15 +92,16 @@ def _download_non_youtube(
 
     import subprocess, os
     
+    # after Apify returns and you download the file to verify:
+    dur = _probe_duration_seconds(local_mp3)
+    expected = int((metadata or {}).get("duration") or 0)
+    if expected and dur < int(expected * 0.9):
+        log.error("Apify output too short (%ss < %ss). Will retry via alternate format.", dur, expected)
+        # delete the short artifact from GCS (optional) and go to §4 fallback
 
-    expected = 0
-    try:
-        expected = int((metadata or {}).get("duration") or 0)
-    except Exception:
-        expected = 0
-
-    subproc_timeout_s = int(os.getenv("YTDLP_SUBPROC_TIMEOUT_S", "0")) or max(600, expected * 2 + 180)
-    log.info("Non-YT timeout = %ss (expected duration=%s)", subproc_timeout_s, expected)
+    # allow env override; otherwise scale with duration
+    subproc_timeout_s = int(os.getenv("YTDLP_SUBPROC_TIMEOUT_S", "0")) or max(300, dur * 2 + 120)
+    logging.info("Non-YT timeout: %ss (duration=%ss)", subproc_timeout_s, dur)
 
 
 
@@ -201,9 +199,8 @@ def download_audio(
     output_dir: Path,
     base_filename: str,
     type_input,
-    allow_non_yt_override: bool | None = None,
-    use_proxy_override: bool | None = None,
-    force_apify: bool = False,              # ← NEW
+    allow_non_yt_override: bool | None = None,   # existing from your Option B
+    use_proxy_override: bool | None = None       # NEW
 ) -> Optional[Tuple[str, Dict[str, Any]]]:
     """
     Downloads audio from a given URL using yt-dlp with resilient fallbacks.
@@ -211,30 +208,6 @@ def download_audio(
     """
     enrich: list[str] = []
     metadata: Dict[str, Any] = {}
-
-
-    if force_apify:
-        log.info("Force-Apify enabled; skipping yt-dlp and invoking Apify directly.")
-        # Optional: quick, non-downloading probe for duration (helps set a smart timeout),
-        # but OK to skip if you truly want zero yt-dlp touch.
-        expected_duration = None
-        try:
-            import yt_dlp
-            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
-                info = ydl.extract_info(url, download=False)
-                if info.get("_type") == "playlist" and info.get("entries"):
-                    info = info["entries"][0]
-                expected_duration = int(info.get("duration") or 0) or None
-        except Exception:
-            pass  # fall back to generous default in the Apify helper
-
-        ap = _apify_download_audio(url, output_dir, base_filename, expected_duration=expected_duration)
-        if ap:
-            ap_path, ap_meta = ap
-            return (ap_path, {**metadata, **ap_meta, "download_attempt": "apify_forced"})
-    # If Apify fails, surface a clear error instead of silently falling into yt-dlp
-        raise RuntimeError("Apify path failed while force_apify=True.")
-
     
     # ---- Proxy first ----
     # --- Decide whether to use a proxy (NEW logic) ---
@@ -1019,12 +992,7 @@ def _apify_unwrap(obj: dict) -> dict:
     return obj
 
 
-def _apify_download_audio(
-    url: str,
-    output_dir: Path,
-    base_filename: str,
-    expected_duration: int | None = None, 
-) -> Optional[Tuple[str, Dict[str, Any]]]:
+def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Optional[Tuple[str, Dict[str, Any]]]:
     """
     Run 'streamers/youtube-video-downloader' via API with the correct schema:
       - videos: [{ "url": <string> }]
@@ -1035,8 +1003,8 @@ def _apify_download_audio(
     Then pull dataset/KV results and download the audio locally.
     """
     
-
-    timeout_secs = max(3600, (expected_duration or 0) * 2 + 300)
+    # inside _apify_download_audio(...)
+    timeout_secs = max(3600, int((metadata or {}).get("duration", 0)) * 2 + 300)
 
     # build your upload template to be unique per run to avoid stale partials (see §3)
     file_name_template = f"{base_filename}_apify_{int(time.time())}"
@@ -1049,26 +1017,31 @@ def _apify_download_audio(
     # Build base payload (per actor input schema)
     payload = {
         "videos": [{"url": url}],
-        "preferredFormat": "251",
+        "preferredFormat": "251",            # keep your choice, see §4 to vary
         "useApifyProxy": True,
         "proxyCountry": "US",
         "fileNameTemplate": file_name_template,
-        "uploadTo": "none",                 # set default to none
+        "uploadTo": "gcs",
+        "googleCloudServiceKey": GCP_KEY_JSON,
+        "googleCloudBucketName": GCS_BUCKET,
+
+        # If the actor supports these as INPUT keys, include them:
         "maxConcurrency": 1,
         "requestHandlerTimeoutSecs": timeout_secs,
     }
+
     # If GCS creds present, enable uploading; otherwise return links only
     gcs_key_raw = os.getenv("APIFY_GCS_SERVICE_JSON", "").strip()
     gcs_bucket  = os.getenv("APIFY_GCS_BUCKET", "").strip()
     if gcs_key_raw and gcs_bucket:
         payload["uploadTo"] = "gcs"
+        # googleCloudServiceKey must be a STRING containing the JSON
         payload["googleCloudServiceKey"] = gcs_key_raw
         payload["googleCloudBucketName"] = gcs_bucket
     else:
         payload["uploadTo"] = "none"
         payload["returnOnlyInfo"] = True
 
-    
     # Time controls (tweak via env)
     wait_for_finish = int(os.getenv("APIFY_WAIT_FOR_FINISH_SECS", "60"))
     poll_timeout_ms = int(os.getenv("APIFY_POLL_TIMEOUT_MS", "600000"))  # 10 min
@@ -1370,16 +1343,6 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
-
-
-
-
-
-
-
-
-
-
 
 
 
