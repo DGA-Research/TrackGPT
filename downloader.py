@@ -266,6 +266,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     For non-YouTube links we take a generic path; for YouTube we run a ladder.
     """
     enrich: list[str] = []
+    metadata: Dict[str, Any] = {}
 
     # ---- Proxy first ----
     proxy_url = os.getenv("YTDLP_PROXY_URL", "").strip()
@@ -299,10 +300,11 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     temp_paths_to_cleanup: list[str] = []
     temp_cookies_file: Optional[str] = None
 
-    orig_cookies_file = os.getenv("YTDLP_COOKIES_FILE", getattr(Config, "YTDLP_COOKIES_FILE", "")).strip()
-    cookies_b64 = os.getenv("YTDLP_COOKIES_B64", getattr(Config, "YTDLP_COOKIES_B64", "") if hasattr(Config, "YTDLP_COOKIES_B64") else "").strip()
-    cookies_from_browser = os.getenv("YTDLP_COOKIES_FROM_BROWSER", getattr(Config, "YTDLP_COOKIES_FROM_BROWSER", "") if hasattr(Config, "YTDLP_COOKIES_FROM_BROWSER") else "").strip()
-    user_agent = os.getenv("YTDLP_USER_AGENT", getattr(Config, "YTDLP_USER_AGENT", "")).strip()
+    orig_cookies_file = (os.getenv("YTDLP_COOKIES_FILE") or getattr(Config, "YTDLP_COOKIES_FILE", None)) or None
+    cookies_b64 = (os.getenv("YTDLP_COOKIES_B64") or getattr(Config, "YTDLP_COOKIES_B64", None)) or None
+    cookies_from_browser = (os.getenv("YTDLP_COOKIES_FROM_BROWSER") or getattr(Config, "YTDLP_COOKIES_FROM_BROWSER", None)) or None
+    user_agent = (os.getenv("YTDLP_USER_AGENT") or getattr(Config, "YTDLP_USER_AGENT", None)) or None
+
 
     if cookies_b64:
         try:
@@ -339,7 +341,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                 pass
 
     # ---- Metadata FIRST (so both branches can use it) ----
-    ydl_opts: Dict[str, Any] = {'quiet': True, 'no_warnings': True, 'extract_flat': False}
+    ydl_opts = {'quiet': True, 'no_warnings': True, 'extract_flat': False}
     if temp_cookies_file:
         ydl_opts['cookiefile'] = temp_cookies_file
     elif cookies_from_browser:
@@ -1331,5 +1333,6 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
+
 
 
