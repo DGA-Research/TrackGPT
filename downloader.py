@@ -184,7 +184,16 @@ if not FFMPEG_PATH:
     sys.exit(1) # Exit if ffmpeg is not found
 
 # --- Core Function ---
-def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -> Optional[Tuple[str, Dict[str, Any]]]:
+def download_audio(
+    url: str,
+    output_dir: Path,
+    base_filename: str,
+    type_input,
+    *,
+    allow_non_yt_override: bool | None = None,
+    use_proxy_override: bool | None = None,
+) -> Optional[Tuple[str, Dict[str, Any]]]:
+    
     enrich: list[str] = []
     
     metadata: Dict[str, Any] = {
@@ -1218,6 +1227,7 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
+
 
 
 
