@@ -137,12 +137,6 @@ if check_password():
         transcript_button = st.checkbox("Enter my own transcript file")
         if transcript_button:
             transcript_input = st.text_area("Copy and paste transcript here", key="transcript_input")
-
-        is_youtube_flag = st.checkbox(
-    "Is a YouTube video?",
-    value=False,
-    help="If checked, we'll use the Apify pipeline for YouTube (best for region locks / age gates)."
-)
             
         video_url = st.text_input("Enter a video or audio URL. See [Supported Sources](%s)" % url)
 
@@ -208,34 +202,22 @@ if check_password():
 
                     # A) URL input
                     if video_url:
-                        # If user says “this is YouTube”, we skip yt-dlp entirely and go straight to Apify
-                        if is_youtube_flag:
-                            audio_path_str, metadata_update = download_audio(
-                                video_url,
-                                output_dir,
-                                base_filename,
-                                type_input,
-                                force_apify=True,               # ← NEW: go straight to Apify for YT
-                            )
-                            st.session_state.metadata.update(metadata_update or {})
-                            st.session_state.audio_path = audio_path_str
-                            audio_path = audio_path_str
-                        else:
-                    
-                            # Normal behavior (yt-dlp ladder / non-YT path as you already have)
-                            audio_path_str, metadata_update = download_audio(
-                                video_url,
-                                output_dir,
-                                base_filename,
-                                type_input,
-            # keep your existing overrides if you still use them:
-            # allow_non_yt_override=True/False,
-            # use_proxy_override=...,
-                            )
-                            st.session_state.metadata.update(metadata_update or {})
-                            st.session_state.audio_path = audio_path_str
-                            audio_path = audio_path_str
-                            
+                            if is_youtube(video_url) or allow_non_youtube:
+                                audio_path_str, metadata_update = download_audio(
+                                    video_url,
+                                    output_dir,
+                                    base_filename,
+                                    type_input,
+                                    allow_non_yt_override=allow_non_youtube,          # existing flag
+                                    use_proxy_override=use_proxy_for_non_yt           # NEW flag
+                                )
+                                st.session_state.metadata.update(metadata_update or {})
+                                st.session_state.audio_path = audio_path_str
+                                audio_path = audio_path_str          
+                            else:
+                                st.error("Only YouTube links are enabled. Turn on “Allow non-YouTube links” to proceed.")
+                                st.stop()
+
                     # B) Uploaded file
                     elif uploaded_file:
                         # Save uploaded file to the output dir with a safe name
