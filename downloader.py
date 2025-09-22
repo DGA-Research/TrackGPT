@@ -1017,7 +1017,12 @@ def _apify_unwrap(obj: dict) -> dict:
     return obj
 
 
-def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Optional[Tuple[str, Dict[str, Any]]]:
+def _apify_download_audio(
+    url: str,
+    output_dir: Path,
+    base_filename: str,
+    expected_duration: int | None = None, 
+) -> Optional[Tuple[str, Dict[str, Any]]]:
     """
     Run 'streamers/youtube-video-downloader' via API with the correct schema:
       - videos: [{ "url": <string> }]
@@ -1028,8 +1033,8 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
     Then pull dataset/KV results and download the audio locally.
     """
     
-    # inside _apify_download_audio(...)
-    timeout_secs = max(3600, int((metadata or {}).get("duration", 0)) * 2 + 300)
+
+    timeout_secs = max(3600, (expected_duration or 0) * 2 + 300)
 
     # build your upload template to be unique per run to avoid stale partials (see §3)
     file_name_template = f"{base_filename}_apify_{int(time.time())}"
@@ -1368,6 +1373,7 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
+
 
 
 
