@@ -348,15 +348,34 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         ydl_opts['cookiesfrombrowser'] = cookies_from_browser
     if user_agent:
         ydl_opts['user_agent'] = user_agent
+
+    allow_non_yt = os.getenv("ALLOW_NON_YT", "0").lower() in ("1", "true", "yes")
+
     # --- Early branch for non-YouTube hosts ---
     if not _looks_like_youtube(url):
+        # NEW: require switch
+        if not allow_non_yt:
+            log.info("Non-YouTube URL blocked by config; set ALLOW_NON_YT=1 to enable.")
+            raise ValueError("Non-YouTube URLs are disabled. Paste a YouTube link or enable ALLOW_NON_YT.")
+
+        # existing code…
         proxy_url = os.getenv("YTDLP_PROXY_URL", "").strip()
         if not proxy_url:
-            # Optional: reuse your Apify proxy creds if present
             ap_pw = os.getenv("APIFY_PROXY_PASSWORD", "").strip()
             ap_cty = os.getenv("APIFY_PROXY_COUNTRY", "US").strip()
             if ap_pw:
                 proxy_url = f"http://auto:{ap_pw}@proxy.apify.com:8000/?country={ap_cty}"
+
+        # Before calling _download_non_youtube(...)
+        try:
+            import yt_dlp
+            ydl_opts = {"quiet": True, "no_warnings": True, "socket_timeout": 15}
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # validate extractor support quickly
+                ydl.extract_info(url, download=False)
+        except Exception as e:
+            log.error("Non-YouTube quick probe failed: %s", e)
+            raise ValueError("This site isn’t supported by yt-dlp (or needs cookies/login).")
 
         return _download_non_youtube(
             url,
@@ -367,6 +386,8 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
             proxy_url=proxy_url,
             metadata=metadata,
         )
+
+
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -1333,6 +1354,7 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
+
 
 
 
