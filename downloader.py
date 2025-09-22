@@ -150,93 +150,7 @@ def find_yt_dlp_executable() -> Optional[str]:
         import shutil
         return shutil.which("yt-dlp")
 
-def _download_non_youtube(
-    url: str,
-    output_dir: Path,
-    base_filename: str,
-    *,
-    user_agent: str = "",
-    cookies_from_browser: str = "",
-    proxy_url: str = "",
-    metadata: Dict[str, Any] | None = None,
-) -> Optional[Tuple[str, Dict[str, Any]]]:
-    """
-    Generic path for non-YouTube URLs (Brightcove, JWPlayer, news sites, etc.)
-    - Adds UA and a same-origin Referer
-    - Supports cookies-from-browser and proxy
-    - Enforces a subprocess timeout to avoid 'Processing input…' hangs
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    out_tpl = str(output_dir / f"{base_filename}.%(ext)s")
-    final_mp3 = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
 
-    hdrs: list[str] = []
-    if user_agent:
-        hdrs += ["--user-agent", user_agent, "--add-header", "Accept-Language: en-US,en;q=0.9"]
-
-    # Same-origin referer helps many embeds
-    try:
-        u = urlsplit(url)
-        origin = f"{u.scheme}://{u.netloc}/"
-        hdrs += ["--add-header", f"Referer: {origin}"]
-    except Exception:
-        pass
-
-    if cookies_from_browser:
-        hdrs += ["--cookies-from-browser", cookies_from_browser]
-    if proxy_url:
-        hdrs += ["--proxy", proxy_url]
-
-    cmd = [
-        YT_DLP_PATH,
-        url,
-        "-x", "--audio-format", Config.AUDIO_FORMAT,
-        "--no-playlist", "--no-write-info-json",
-        "--progress", "--no-simulate", "--no-abort-on-error",
-        "-o", out_tpl,
-    ] + hdrs
-
-    import subprocess, os
-    subproc_timeout_s = int(os.getenv("YTDLP_SUBPROC_TIMEOUT_S", "240"))
-
-    logging.info("Non-YouTube URL detected; using generic download path.")
-    logging.debug("yt-dlp (non-yt) command: %s", " ".join(cmd))
-    try:
-        cp = subprocess.run(
-            cmd,
-            check=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=subproc_timeout_s,
-        )
-        logging.info("yt-dlp stdout:\n%s", cp.stdout)
-        if cp.stderr:
-            logging.debug("yt-dlp stderr:\n%s", cp.stderr)
-
-        # With -x --audio-format mp3, yt-dlp should produce an mp3
-        if final_mp3.exists():
-            return str(final_mp3), {**(metadata or {}), "download_attempt": "non_yt"}
-
-        # Fallback: if site produced a different audio container, still accept it
-        for cand in sorted(output_dir.glob(f"{base_filename}.*"), key=lambda p: p.stat().st_mtime, reverse=True):
-            if cand.suffix.lower() in [".mp3", ".m4a", ".webm", ".opus", ".ogg", ".wav"]:
-                if cand.suffix.lower() == ".mp3":
-                    return str(cand), {**(metadata or {}), "download_attempt": "non_yt"}
-                # Let yt-dlp’s -x handle conversion in most cases;
-                # if a site skipped it, your existing ffmpeg path can be used instead.
-                return str(cand), {**(metadata or {}), "download_attempt": "non_yt"}
-
-        logging.error("Non-YT: yt-dlp completed but no audio file was produced.")
-        return None
-
-    except subprocess.TimeoutExpired:
-        logging.error("Non-YT: yt-dlp timed out after %s s", subproc_timeout_s)
-        return None
-    except subprocess.CalledProcessError as e:
-        logging.error("Non-YT: yt-dlp failed (exit %s)\nCmd: %s\nStderr:\n%s",
-                      e.returncode, " ".join(e.cmd if isinstance(e.cmd, list) else [str(e.cmd)]), e.stderr or "")
-        return None
 
 def find_ffmpeg_executable() -> Optional[str]:
     """
@@ -370,13 +284,30 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input, a
         # Before calling _download_non_youtube(...)
         try:
             import yt_dlp
-            ydl_opts = {"quiet": True, "no_warnings": True, "socket_timeout": 15}
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # validate extractor support quickly
+            # Build headers like the real run
+            probe_opts = {"quiet": True, "no_warnings": True, "socket_timeout": 15}
+            headers = {}
+            if user_agent:
+                headers["User-Agent"] = user_agent
+                headers["Accept-Language"] = "en-US,en;q=0.9"
+            try:
+                u = urlsplit(url)
+                origin = f"{u.scheme}://{u.netloc}/"
+                headers["Referer"] = origin
+            except Exception:
+                pass
+            if headers:
+                probe_opts["http_headers"] = headers
+
+            if temp_cookies_file:
+                probe_opts["cookiefile"] = temp_cookies_file
+            elif cookies_from_browser:
+                probe_opts["cookiesfrombrowser"] = cookies_from_browser
+            if proxy_url:
+                probe_opts["proxy"] = proxy_url
+
+            with yt_dlp.YoutubeDL(probe_opts) as ydl:
                 ydl.extract_info(url, download=False)
-        except Exception as e:
-            log.error("Non-YouTube quick probe failed: %s", e)
-            raise ValueError("This site isn’t supported by yt-dlp (or needs cookies/login).")
 
         return _download_non_youtube(
             url,
@@ -1355,6 +1286,7 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
+
 
 
 
