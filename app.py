@@ -197,7 +197,7 @@ if check_password():
                     if video_url:
                         if is_youtube(video_url) or allow_non_youtube:
                             audio_path_str, metadata_update = download_audio(
-                                video_url, output_dir, base_filename, type_input
+                                video_url, output_dir, base_filename, type_input, allow_non_yt_override=allow_non_youtube
                             )
                             # persist metadata and audio path
                             st.session_state.metadata.update(metadata_update or {})
