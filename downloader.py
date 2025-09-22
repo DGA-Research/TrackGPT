@@ -186,7 +186,23 @@ if not FFMPEG_PATH:
 # --- Core Function ---
 def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -> Optional[Tuple[str, Dict[str, Any]]]:
     enrich: list[str] = []
+    
+    metadata: Dict[str, Any] = {
+        "title": "Unknown Title",
+        "uploader": "Unknown Uploader",
+        "upload_date": None,
+        "webpage_url": url,
+        "duration": None,
+        "extractor": "unknown",
+        "view_count": None,
+        "thumbnail": None,
+        "type_input": type_input,
+    }
 
+    def _merge_meta(base: Optional[Dict[str, Any]], extra: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        return {**(base or {}), **(extra or {})}
+
+    
     # --- proxy first
     proxy_url = os.getenv("YTDLP_PROXY_URL", "").strip()
     if not proxy_url:
@@ -357,10 +373,10 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                 if not apify_tried and _is_region_lock(stderr):
                     apify_tried = True
                     log.info("Detected region lock on '%s'. Trying Apify fallback…", label)
-                    ap = _apify_download_audio(url, output_dir, base_filename)
+                    aap = _apify_download_audio(url, output_dir, base_filename)
                     if ap:
                         ap_path, ap_meta = ap
-                        return (ap_path, {**metadata, **ap_meta})
+                        return (ap_path, _merge_meta(metadata, ap_meta))
             except Exception as e:
                 log.error("Unexpected error during download (attempt '%s'): %s", label, e, exc_info=True)
                 last_err = e
@@ -373,7 +389,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         ap = _apify_download_audio(url, output_dir, base_filename)
         if ap:
             ap_path, ap_meta = ap
-            return (ap_path, {**metadata, **ap_meta})
+            return (ap_path, _merge_meta(metadata, ap_meta))
 
     if last_err: log.error("Last error: %s", last_err)
     return None
@@ -1202,6 +1218,7 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
+
 
 
 
