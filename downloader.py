@@ -835,6 +835,20 @@ def _download_cookies_to_temp(url: str) -> Optional[str]:
         log.warning("Could not fetch cookies from %s: %s", url, e)
         return None
 
+def _ensure_wav_16k_mono(path_in: Path, path_out: Path) -> Optional[str]:
+    """Transcode any input to WAV mono 16 kHz PCM (CBR) for ASR stability."""
+    try:
+        if path_out.exists():
+            path_out.unlink()
+        conv = subprocess.run(
+            [FFMPEG_PATH, "-y", "-i", str(path_in),
+             "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(path_out)],
+            check=True, capture_output=True, text=True, encoding="utf-8"
+        )
+        return str(path_out) if path_out.exists() and path_out.stat().st_size > 0 else None
+    except Exception as e:
+        log.error("WAV transcode failed: %s", e, exc_info=True)
+        return None
 
 def _ensure_mp3(path_in: Path, path_out: Path) -> Optional[str]:
     """Convert any input audio/video to MP3 at path_out using ffmpeg; return output path or None."""
@@ -1319,6 +1333,7 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
+
 
 
 
