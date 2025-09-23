@@ -61,6 +61,23 @@ def find_ffmpeg_executable() -> Optional[str]:
     import shutil as _shutil
     return _shutil.which("ffmpeg")
 
+def find_ffprobe_executable() -> Optional[str]:
+    import shutil as _shutil
+    return _shutil.which("ffprobe")
+
+FFPROBE_PATH = find_ffprobe_executable()
+
+def _get_media_duration_seconds(path_in: Path) -> Optional[float]:
+    if not FFPROBE_PATH:
+        return None
+    try:
+        import subprocess as _sub
+        cp = _sub.run([FFPROBE_PATH, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(path_in)], check=True, capture_output=True, text=True, encoding="utf-8")
+        val = (cp.stdout or "").strip()
+        return float(val) if val else None
+    except Exception:
+        return None
+
 
 
 def _looks_like_youtube(u: str) -> bool:
@@ -115,7 +132,7 @@ def _download_non_youtube(
         url,
         "-x", "--audio-format", Config.AUDIO_FORMAT,
         "--no-playlist", "--no-write-info-json",
-        "--progress", "--no-simulate", "--no-abort-on-error",
+        "--progress", "--retries", str(getattr(Config, "YTDLP_RETRIES", 5)), "--fragment-retries", "15", "--concurrent-fragments", "4", "--socket-timeout", "30", "--no-simulate", "",
         "-o", out_tpl,
     ] + hdrs
 
@@ -416,7 +433,7 @@ def download_audio(
         YT_DLP_PATH, url,
         "-x", "--audio-format", Config.AUDIO_FORMAT,
         "--no-playlist", "--no-write-info-json",
-        "--progress", "--no-simulate", "--no-abort-on-error",
+        "--progress", "--retries", str(getattr(Config, "YTDLP_RETRIES", 5)), "--fragment-retries", "15", "--concurrent-fragments", "4", "--socket-timeout", "30", "--no-simulate", "",
         "--restrict-filenames",
         "-o", output_path_template,
         "--force-ipv4",
@@ -428,8 +445,8 @@ def download_audio(
         ("web_forced", base_cmd + ["--extractor-args", "youtube:webpage_download_web=1"]),
         ("bestaudio_ladder",
             [YT_DLP_PATH, url, "-f", "251/140/bestaudio/best",
-             "--no-playlist", "--no-write-info-json", "--progress", "--no-simulate",
-             "--no-abort-on-error", "--restrict-filenames", "-o", output_path_template,
+             "--no-playlist", "--no-write-info-json", "--progress", "--retries", str(getattr(Config, "YTDLP_RETRIES", 5)), "--fragment-retries", "15", "--concurrent-fragments", "4", "--socket-timeout", "30", "--no-simulate",
+             "", "--restrict-filenames", "-o", output_path_template,
              "--force-ipv4"] + enrich),
     ]
 
