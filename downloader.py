@@ -112,12 +112,22 @@ def _download_non_youtube(
 
         # With -x --audio-format mp3, yt-dlp should produce an mp3
         if final_mp3.exists():
+             wav_out = output_dir / f"{base_filename}.wav"
+            wav_final = _ensure_wav_16k_mono(final_mp3, wav_out)
+            if wav_final:
+                mm = {**(metadata or {}), "download_attempt": "non_yt", "asr_input": "wav16k", "wav_path": wav_final}
+                return wav_final, mm
             return str(final_mp3), {**(metadata or {}), "download_attempt": "non_yt"}
+
 
         # Fallback: if site produced a different audio container, still accept it
         for cand in sorted(output_dir.glob(f"{base_filename}.*"), key=lambda p: p.stat().st_mtime, reverse=True):
             if cand.suffix.lower() in [".mp3", ".m4a", ".webm", ".opus", ".ogg", ".wav"]:
                 if cand.suffix.lower() == ".mp3":
+                    wav_out = output_dir / f"{base_filename}.wav"
+                    wav_final = _ensure_wav_16k_mono(cand, wav_out)
+                    if wav_final:
+                        return wav_final, {**(metadata or {}), "download_attempt": "non_yt", "asr_input": "wav16k", "wav_path": wav_final}
                     return str(cand), {**(metadata or {}), "download_attempt": "non_yt"}
                 # Let yt-dlp’s -x handle conversion in most cases;
                 # if a site skipped it, your existing ffmpeg path can be used instead.
@@ -448,20 +458,43 @@ def download_audio(
                 if cp.stderr:
                     log.debug("yt-dlp stderr:\n%s", cp.stderr)
 
+                # Success case 1
                 if final_audio_path.exists():
                     log.info("Success (%s) → %s", label, final_audio_path)
+                    wav_out = output_dir / f"{base_filename}.wav"
+                    wav_final = _ensure_wav_16k_mono(final_audio_path, wav_out)
+                    if wav_final:
+                        meta2 = {**metadata, "download_attempt": label, "asr_input": "wav16k", "wav_path": wav_final}
+                        _cleanup_temp_cookies()
+                        return (wav_final, meta2)
+                    _cleanup_temp_cookies()
                     return (str(final_audio_path), {**metadata, "download_attempt": label})
+
 
                 # any produced audio → convert if needed
                 for cand in sorted(output_dir.glob(f"{base_filename}.*"), key=lambda p: p.stat().st_mtime, reverse=True):
                     if cand.suffix.lower() in [".mp3", ".m4a", ".webm", ".opus", ".ogg", ".wav"]:
                         if cand.suffix.lower() == ".mp3":
                             log.info("Success (%s) → %s", label, cand)
+                            wav_out = output_dir / f"{base_filename}.wav"
+                            wav_final = _ensure_wav_16k_mono(cand, wav_out)
+                            if wav_final:
+                                _cleanup_temp_cookies()
+                                return (wav_final, {**metadata, "download_attempt": label, "asr_input": "wav16k", "wav_path": wav_final})
+                            _cleanup_temp_cookies()
                             return (str(cand), {**metadata, "download_attempt": label})
+                            
                         out = _ensure_mp3(cand, final_audio_path)
                         if out:
                             log.info("Success (%s) + convert → %s", label, out)
+                            wav_out = output_dir / f"{base_filename}.wav"
+                            wav_final = _ensure_wav_16k_mono(Path(out), wav_out)
+                            if wav_final:
+                                _cleanup_temp_cookies()
+                                return (wav_final, {**metadata, "download_attempt": label, "asr_input": "wav16k", "wav_path": wav_final})
+                            _cleanup_temp_cookies()
                             return (out, {**metadata, "download_attempt": label})
+
 
                 log.error("Attempt '%s' finished but no usable audio produced.", label)
                 last_err = RuntimeError("yt-dlp completed without producing expected output.")
@@ -1145,6 +1178,8 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
                         if chunk:
                             f.write(chunk)
             if out_path.exists() and out_path.stat().st_size > 0:
+                wav_out = output_dir / f"{base_filename}.wav"
+                wav_final = _ensure_wav_16k_mono(out_path, wav_out)
                 meta = {
                     "extractor": "apify",
                     "webpage_url": url,
@@ -1153,6 +1188,13 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
                     "dataset_id": ds_id,
                     "kv_store_id": kv_id,
                 }
+                if wav_final:
+                    meta.update({"asr_input": "wav16k", "wav_path": wav_final})
+                    log.info("Apify fallback success (WAV) → %s", wav_final)
+                    return wav_final, meta
+                log.info("Apify fallback success (MP3) → %s", out_path)
+                return str(out_path), meta
+
                 log.info("Apify fallback success → %s", out_path)
                 return str(out_path), meta
         except Exception as e:
@@ -1333,6 +1375,7 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
+
 
 
 
