@@ -21,13 +21,48 @@ import urllib.request
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any, List
 
+
+
+
+log = logging.getLogger(__name__)
+
+
 import time
 
 import requests
 from config import Config
 
+from urllib.parse import urlsplit, parse_qs
 
-from urllib.parse import urlsplit
+def _extract_youtube_id(u: str) -> Optional[str]:
+    try:
+        p = urlsplit(u)
+        if p.netloc:
+            q = parse_qs(p.query)
+            if "v" in q and len(q["v"][0]) == 11:
+                return q["v"][0]
+        # youtu.be/<id>
+        import re
+        m = re.search(r"youtu\.be/([A-Za-z0-9_-]{11})", u or "")
+        return m.group(1) if m else None
+    except Exception:
+        return None
+        
+def find_yt_dlp_executable() -> Optional[str]:
+    """Locates the yt-dlp executable on the system."""
+    try:
+        return yt_dlp.utils.exe_path()  # bundled path if available
+    except AttributeError:
+        import shutil as _shutil
+        return _shutil.which("yt-dlp")
+
+
+def find_ffmpeg_executable() -> Optional[str]:
+    """Locates the ffmpeg executable on the system by searching PATH."""
+    import shutil as _shutil
+    return _shutil.which("ffmpeg")
+
+
 
 def _looks_like_youtube(u: str) -> bool:
     try:
@@ -42,6 +77,7 @@ def _download_non_youtube(
     base_filename: str,
     *,
     user_agent: str = "",
+    cookies_file: str | None = None, 
     cookies_from_browser: str = "",
     proxy_url: str = "",
     metadata: Dict[str, Any] | None = None,
@@ -72,6 +108,8 @@ def _download_non_youtube(
         hdrs += ["--cookies-from-browser", cookies_from_browser]
     if proxy_url:
         hdrs += ["--proxy", proxy_url]
+    if cookies_file:
+        hdrs += ["--cookies", cookies_file]
 
     cmd = [
         YT_DLP_PATH,
@@ -91,11 +129,7 @@ def _download_non_youtube(
 
     # allow env override; otherwise scale with duration
     subproc_timeout_s = int(os.getenv("YTDLP_SUBPROC_TIMEOUT_S", "0")) or max(300, dur * 2 + 120)
-    logging.info("Non-YT timeout: %ss (duration=%ss)", subproc_timeout_s, dur)
-
-
-
-    log.info("Non-YT timeout = %ss (duration=%s)", subproc_timeout_s, (metadata or {}).get("duration"))
+    log.info("Non-YT timeout: %ss (duration=%ss)", subproc_timeout_s, dur)
 
     try:
         cp = subprocess.run(
@@ -106,13 +140,13 @@ def _download_non_youtube(
             encoding="utf-8",
             timeout=subproc_timeout_s,
         )
-        logging.info("yt-dlp stdout:\n%s", cp.stdout)
+        log.info("yt-dlp stdout:\n%s", cp.stdout)
         if cp.stderr:
-            logging.debug("yt-dlp stderr:\n%s", cp.stderr)
+            log.debug("yt-dlp stderr:\n%s", cp.stderr)
 
         # With -x --audio-format mp3, yt-dlp should produce an mp3
         if final_mp3.exists():
-             wav_out = output_dir / f"{base_filename}.wav"
+            wav_out = output_dir / f"{base_filename}.wav"
             wav_final = _ensure_wav_16k_mono(final_mp3, wav_out)
             if wav_final:
                 mm = {**(metadata or {}), "download_attempt": "non_yt", "asr_input": "wav16k", "wav_path": wav_final}
@@ -133,14 +167,14 @@ def _download_non_youtube(
                 # if a site skipped it, your existing ffmpeg path can be used instead.
                 return str(cand), {**(metadata or {}), "download_attempt": "non_yt"}
 
-        logging.error("Non-YT: yt-dlp completed but no audio file was produced.")
+        log.error("Non-YT: yt-dlp completed but no audio file was produced.")
         return None
 
     except subprocess.TimeoutExpired:
-        logging.error("Non-YT: yt-dlp timed out after %s s", subproc_timeout_s)
+        log.error("Non-YT: yt-dlp timed out after %s s", subproc_timeout_s)
         return None
     except subprocess.CalledProcessError as e:
-        logging.error("Non-YT: yt-dlp failed (exit %s)\nCmd: %s\nStderr:\n%s",
+        log.error("Non-YT: yt-dlp failed (exit %s)\nCmd: %s\nStderr:\n%s",
                       e.returncode, " ".join(e.cmd if isinstance(e.cmd, list) else [str(e.cmd)]), e.stderr or "")
         return None
 
@@ -152,35 +186,7 @@ except ImportError:
     print("ERROR: 'yt-dlp' library not found. Install using: pip install yt-dlp", file=sys.stderr)
     sys.exit(1)
 
-def find_yt_dlp_executable() -> Optional[str]:
-    """
-    Locates the yt-dlp executable on the system.
 
-    It first attempts to use `yt_dlp.utils.exe_path()` if available (for bundled
-    executables), and falls back to searching the system's PATH using `shutil.which()`.
-
-    Returns:
-        The full path to the yt-dlp executable if found, otherwise None.
-    """
-    try:
-        # Attempt to find executable using yt-dlp's internal helper
-        return yt_dlp.utils.exe_path()
-    except AttributeError:
-        # Fallback to searching system PATH if internal helper is not available
-        import shutil
-        return shutil.which("yt-dlp")
-
-
-
-def find_ffmpeg_executable() -> Optional[str]:
-    """
-    Locates the ffmpeg executable on the system by searching the system's PATH.
-
-    Returns:
-        The full path to the ffmpeg executable if found, otherwise None.
-    """
-    import shutil
-    return shutil.which("ffmpeg")
 
 YT_DLP_PATH = find_yt_dlp_executable()
 if not YT_DLP_PATH:
@@ -389,23 +395,6 @@ def download_audio(
             'type_input': type_input,
         }
 
-    # ---- If NOT YouTube: go generic now (metadata is defined) ----
-    if not _looks_like_youtube(url):
-        try:
-            res = _download_non_youtube(
-                url,
-                output_dir,
-                base_filename,
-                user_agent=user_agent,
-                cookies_file=temp_cookies_file,
-                cookies_from_browser=cookies_from_browser,
-                proxy_url=proxy_url,
-                metadata=metadata,
-            )
-            return res
-        finally:
-            _cleanup_temp_cookies()
-
     # ---- YouTube ladder ----
     if user_agent:
         enrich += [
@@ -546,8 +535,6 @@ def download_audio(
 
 
 
-log = logging.getLogger(__name__)
-
 APIFY_ACTOR = os.getenv("APIFY_ACTOR", "streamers~youtube-video-downloader")
 
 # ---- Optional: use Apify Proxy automatically if available ----
@@ -562,12 +549,6 @@ log.info(
     getattr(Config, "YTDLP_RETRIES", 2),
 )
 
-# --- Dependency Checks ---
-try:
-    import yt_dlp
-except ImportError:
-    print("ERROR: 'yt-dlp' library not found. Install using: pip install yt-dlp", file=sys.stderr)
-    sys.exit(1)
 
 def _gcs_find_and_download(
     bucket_name: str,
@@ -606,14 +587,6 @@ def _gcs_find_and_download(
     def _is_audio_name(name: str) -> bool:
         n = name.lower()
         return n.endswith(AUDIO_EXTS) or n.endswith(".mp3.mpga")
-
-    # Extract YT video ID (for Apify’s naming: "<videoId>_<title>.<ext>")
-    def _extract_youtube_id(u: str) -> Optional[str]:
-        import re
-        m = re.search(r"[?&]v=([A-Za-z0-9_-]{11})", u or "")
-        if m: return m.group(1)
-        m = re.search(r"youtu\.be/([A-Za-z0-9_-]{11})", u or "")
-        return m.group(1) if m else None
 
     video_id = _extract_youtube_id(url) if url else None
 
@@ -714,34 +687,6 @@ def _gcs_find_and_download(
     except Exception as e:
         log.error("GCS fallback: error downloading %s: %s", best.name, e)
         return None
-
-
-def find_yt_dlp_executable() -> Optional[str]:
-    """Locates the yt-dlp executable on the system."""
-    try:
-        return yt_dlp.utils.exe_path()  # bundled path if available
-    except AttributeError:
-        import shutil as _shutil
-        return _shutil.which("yt-dlp")
-
-
-def find_ffmpeg_executable() -> Optional[str]:
-    """Locates the ffmpeg executable on the system by searching PATH."""
-    import shutil as _shutil
-    return _shutil.which("ffmpeg")
-
-
-YT_DLP_PATH = find_yt_dlp_executable()
-if not YT_DLP_PATH:
-    print("ERROR: 'yt-dlp' command not found in PATH or via library helper.", file=sys.stderr)
-    print("Please ensure yt-dlp is installed and accessible.", file=sys.stderr)
-
-FFMPEG_PATH = find_ffmpeg_executable()
-if not FFMPEG_PATH:
-    print("ERROR: 'ffmpeg' command not found in system PATH.", file=sys.stderr)
-    print("Please ensure ffmpeg is installed and accessible.", file=sys.stderr)
-    sys.exit(1)
-
 
 
 def _apify_try_gcs_pull(url: str, output_dir: Path, base_filename: str) -> Optional[str]:
@@ -907,10 +852,6 @@ def _ensure_mp3(path_in: Path, path_out: Path) -> Optional[str]:
 
 
 # ---------- Apify fallbacks ----------
-
-# --- Apify fallbacks ---
-import time
-
 # --- Small HTTP downloader used by Apify fallback -----------------------------
 def _apify_http_download(src_url: str, dst_path: Path) -> bool:
     import requests
@@ -1195,8 +1136,6 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
                 log.info("Apify fallback success (MP3) → %s", out_path)
                 return str(out_path), meta
 
-                log.info("Apify fallback success → %s", out_path)
-                return str(out_path), meta
         except Exception as e:
             log.error("Apify: error downloading returned audio URL: %s", e)
 
@@ -1259,6 +1198,7 @@ def _apify_ytdl_fallback(
 
             # items already loaded from dataset or OUTPUT
             item0 = items[0] if isinstance(items, list) and items else (items or {})
+            kv_id = item0.get("keyValueStoreId") 
             downloads = item0.get("downloads") or []
 
 
@@ -1375,6 +1315,7 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
+
 
 
 
