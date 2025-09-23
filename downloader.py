@@ -1,5 +1,4 @@
-"""
-Module for downloading audio from URLs using yt-dlp.
+"""Module for downloading audio from URLs using yt-dlp.
 
 Handles:
 - Finding yt-dlp and ffmpeg executables
@@ -356,8 +355,9 @@ def download_audio(
                 url,
                 output_dir,
                 base_filename,
-                user_agent=user_agent,
-                cookies_from_browser=cookies_from_browser,
+                user_agent=user_agent or "",
+                cookies_file=temp_cookies_file,
+                cookies_from_browser=cookies_from_browser or "",
                 proxy_url=proxy_url,     # <- only set if checkbox was enabled
                  metadata=metadata,
             )
@@ -536,11 +536,6 @@ def download_audio(
 
 
 APIFY_ACTOR = os.getenv("APIFY_ACTOR", "streamers~youtube-video-downloader")
-
-# ---- Optional: use Apify Proxy automatically if available ----
-apify_pw = os.getenv("APIFY_PROXY_PASSWORD", "")
-apify_country = os.getenv("APIFY_PROXY_COUNTRY", "US")
-proxy_url = os.getenv("YTDLP_PROXY_URL", "").strip()
 
 log.info(
     "yt-dlp cfg: cookies_file=%r ua_set=%s retries=%s",
@@ -852,20 +847,6 @@ def _ensure_mp3(path_in: Path, path_out: Path) -> Optional[str]:
 
 
 # ---------- Apify fallbacks ----------
-# --- Small HTTP downloader used by Apify fallback -----------------------------
-def _apify_http_download(src_url: str, dst_path: Path) -> bool:
-    import requests
-    try:
-        with requests.get(src_url, stream=True, timeout=(15, 120)) as r:
-            r.raise_for_status()
-            with open(dst_path, "wb") as f:
-                for chunk in r.iter_content(262_144):
-                    if chunk:
-                        f.write(chunk)
-        return True
-    except Exception as e:
-        log.error("Apify download failed: %s", e)
-        return False
 
 # --- Robust Apify fallback (run -> poll dataset; then run-sync fallback) ------
 def _is_region_lock(msg: str) -> bool:
@@ -1315,14 +1296,3 @@ def _apify_ytdl_fallback(
             log.error("Apify fallback unexpected error: %s", e, exc_info=True)
 
     return None
-
-
-
-
-
-
-
-
-
-
-
