@@ -59,8 +59,6 @@ if check_password():
         output_dir: Path,
         base_filename: str,
         type_input,
-        allow_non_yt_override: bool | None = None,
-        use_proxy_override: bool | None = None,
     ):
         """Wrapper around downloader.download_audio that skips Apify fallbacks."""
         original_apify = getattr(downloader_module, "_apify_download_audio", None)
@@ -80,8 +78,6 @@ if check_password():
                 output_dir,
                 base_filename,
                 type_input,
-                allow_non_yt_override=allow_non_yt_override,
-                use_proxy_override=use_proxy_override,
             )
         finally:
             if original_apify is not None:
@@ -241,8 +237,6 @@ if check_password():
                                     output_dir,
                                     base_filename,
                                     type_input,
-                                    allow_non_yt_override=allow_non_youtube,          # existing flag
-                                    use_proxy_override=use_proxy_for_non_yt           # NEW flag
                                 )
                                 st.session_state.metadata.update(metadata_update or {})
                                 st.session_state.audio_path = audio_path_str
