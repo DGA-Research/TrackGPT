@@ -132,7 +132,7 @@ def _download_non_youtube(
         url,
         "-x", "--audio-format", Config.AUDIO_FORMAT,
         "--no-playlist", "--no-write-info-json",
-        "--progress", "--retries", str(getattr(Config, "YTDLP_RETRIES", 5)), "--fragment-retries", "15", "--concurrent-fragments", "4", "--socket-timeout", "30", "--no-simulate", "",
+        "--progress", "--retries", str(getattr(Config, "YTDLP_RETRIES", 5)), "--fragment-retries", "15", "--concurrent-fragments", "4", "--socket-timeout", "30", "--no-simulate",
         "-o", out_tpl,
     ] + hdrs
 
@@ -433,7 +433,7 @@ def download_audio(
         YT_DLP_PATH, url,
         "-x", "--audio-format", Config.AUDIO_FORMAT,
         "--no-playlist", "--no-write-info-json",
-        "--progress", "--retries", str(getattr(Config, "YTDLP_RETRIES", 5)), "--fragment-retries", "15", "--concurrent-fragments", "4", "--socket-timeout", "30", "--no-simulate", "",
+        "--progress", "--retries", str(getattr(Config, "YTDLP_RETRIES", 5)), "--fragment-retries", "15", "--concurrent-fragments", "4", "--socket-timeout", "30", "--no-simulate",
         "--restrict-filenames",
         "-o", output_path_template,
         "--force-ipv4",
@@ -446,7 +446,7 @@ def download_audio(
         ("bestaudio_ladder",
             [YT_DLP_PATH, url, "-f", "251/140/bestaudio/best",
              "--no-playlist", "--no-write-info-json", "--progress", "--retries", str(getattr(Config, "YTDLP_RETRIES", 5)), "--fragment-retries", "15", "--concurrent-fragments", "4", "--socket-timeout", "30", "--no-simulate",
-             "", "--restrict-filenames", "-o", output_path_template,
+             "--restrict-filenames", "-o", output_path_template,
              "--force-ipv4"] + enrich),
     ]
 
