@@ -52,43 +52,7 @@ def check_password():
 if check_password():
     # Import functions
     from config import Config
-    import downloader as downloader_module
-
-    def download_audio_no_apify(
-        url: str,
-        output_dir: Path,
-        base_filename: str,
-        type_input,
-        allow_non_yt_override: bool | None = None,
-        use_proxy_override: bool | None = None,
-    ):
-        """Wrapper around downloader.download_audio that skips Apify fallbacks."""
-        original_apify = getattr(downloader_module, "_apify_download_audio", None)
-        original_ytdl = getattr(downloader_module, "_apify_ytdl_fallback", None)
-
-        def _disabled(*args, **kwargs):
-            log.info("Apify fallback disabled for this run.")
-            return None
-
-        try:
-            if original_apify is not None:
-                downloader_module._apify_download_audio = _disabled
-            if original_ytdl is not None:
-                downloader_module._apify_ytdl_fallback = _disabled
-            return downloader_module.download_audio(
-                url,
-                output_dir,
-                base_filename,
-                type_input,
-                allow_non_yt_override=allow_non_yt_override,
-                use_proxy_override=use_proxy_override,
-            )
-        finally:
-            if original_apify is not None:
-                downloader_module._apify_download_audio = original_apify
-            if original_ytdl is not None:
-                downloader_module._apify_ytdl_fallback = original_ytdl
-
+    from downloader import download_audio
     from transcriber import transcribe_file
     from analyzer import extract_raw_data_from_text
     from output import generate_report_highlights, save_text_file, generate_report_bullets, generate_report_both
@@ -236,7 +200,7 @@ if check_password():
                     # A) URL input
                     if video_url:
                             if is_youtube(video_url) or allow_non_youtube:
-                                audio_path_str, metadata_update = download_audio_no_apify(
+                                audio_path_str, metadata_update = download_audio(
                                     video_url,
                                     output_dir,
                                     base_filename,
