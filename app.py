@@ -94,18 +94,6 @@ if check_password():
     url = "https://docs.google.com/document/d/1SR45h_w20Vn1-KrCRfAfkf2E2-aDvH-mXu8S2eA4630/edit?usp=sharing"
     st.markdown("Questions? Check out the [TrackGPT Instructions](%s)" % url)
     
-    allow_non_youtube = st.checkbox(
-        "Allow non-YouTube links",
-        value=False,
-        help="Uncheck to only accept YouTube URLs"
-    )
-
-    use_proxy_for_non_yt = st.checkbox(
-        "Use proxy for non-YouTube links",
-        value=False,
-        help="Only enable if the site is geo/region locked or your network blocks it"
-    )
-
     st.caption("Optional: provide YouTube cookies for sign-in/consent/region-locked videos.")
     cookies_file = st.file_uploader("Upload cookies.txt", type=["txt"])
     if cookies_file is not None:
@@ -231,18 +219,22 @@ if check_password():
 
                     # A) URL input
                     if video_url:
-                            if is_youtube(video_url) or allow_non_youtube:
-                                audio_path_str, metadata_update = download_audio_no_apify(
-                                    video_url,
-                                    output_dir,
-                                    base_filename,
-                                    type_input,
-                                )
+                            download_result = download_audio_no_apify(
+                                video_url,
+                                output_dir,
+                                base_filename,
+                                type_input,
+                            )
+                            if download_result:
+                                audio_path_str, metadata_update = download_result
                                 st.session_state.metadata.update(metadata_update or {})
+                                st.session_state.metadata["webpage_url"] = video_url
+                                if not st.session_state.metadata.get("extractor"):
+                                    st.session_state.metadata["extractor"] = "youtube" if is_youtube(video_url) else "generic"
                                 st.session_state.audio_path = audio_path_str
-                                audio_path = audio_path_str          
+                                audio_path = audio_path_str
                             else:
-                                st.error("Only YouTube links are enabled. Enable 'Allow non-YouTube links' to proceed.")
+                                st.error("Processing failed: unable to download audio from the provided URL. Upload a file or provide a transcript instead.")
                                 st.stop()
 
                     # B) Uploaded file
