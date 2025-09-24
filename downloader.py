@@ -989,6 +989,7 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
 
     payload: dict[str, Any] = {
         "videoUrl": url,
+        "videos": [{"url": url}],
         "proxy": {
             "useApifyProxy": True,
             "apifyProxyCountry": proxy_country,
