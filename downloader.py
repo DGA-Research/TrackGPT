@@ -89,6 +89,8 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         after handling errors.
     """
 
+    logging.info("Starting download for %s", url)
+    logging.debug("Requested output_dir=%s base_filename=%s type_input=%s", output_dir, base_filename, type_input)
     # Check if yt-dlp executable was found during initial checks
     if not YT_DLP_PATH:
          logging.error("yt-dlp executable not found. Cannot download.")
@@ -107,6 +109,8 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
             logging.info(f"Using cookies file: {cookies_path}")
         else:
             logging.warning(f"Cookies file not found at {cookies_path}. Continuing without cookies.")
+    else:
+        logging.debug("No cookies file configured for yt-dlp.")
 
     # Ensure the output directory exists, creating it if necessary
     try:
@@ -114,6 +118,8 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     except OSError as e:
         logging.error(f"Failed to create output directory {output_dir}: {e}")
         return None
+
+    logging.debug("Output directory ready: %s", output_dir)
 
     # --- Metadata Extraction ---
     # Extract metadata using the yt-dlp library without downloading the video.
@@ -123,6 +129,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         'no_warnings': True,    # Hide warnings from yt-dlp library
         'extract_flat': False,  # Ensure full metadata is extracted
     }
+    logging.info("Extracting metadata via yt-dlp for %s", url)
     # Metadata extraction strategy:
     # - Attempt to extract comprehensive metadata first.
     # - If extraction fails (e.g., due to geo-restrictions, private video),
@@ -144,6 +151,8 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
                 'view_count': info_dict.get('view_count'),
                 'thumbnail': info_dict.get('thumbnail'),
             }
+            logging.info("Metadata extraction succeeded: title='%s', extractor='%s'", metadata.get('title'), metadata.get('extractor'))
+            logging.debug("Metadata details: duration=%s view_count=%s", metadata.get('duration'), metadata.get('view_count'))
     except yt_dlp.utils.DownloadError as e:
         # Log a warning if metadata extraction fails and use default values
         logging.warning(f"yt-dlp metadata extraction failed for {url}: {e}. Using default metadata.")
@@ -194,6 +203,7 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     logging.info(f"Attempting to download audio from: {url}")
     # Log the command being executed for debugging purposes
     logging.debug(f"yt-dlp command: {' '.join(cmd)}")
+    logging.info("Invoking yt-dlp CLI to download audio...")
 
     try:
         # Execute the yt-dlp command using subprocess
