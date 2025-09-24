@@ -94,7 +94,12 @@ if check_password():
     url = "https://docs.google.com/document/d/1SR45h_w20Vn1-KrCRfAfkf2E2-aDvH-mXu8S2eA4630/edit?usp=sharing"
     st.markdown("Questions? Check out the [TrackGPT Instructions](%s)" % url)
     
-    st.caption("Optional: provide YouTube cookies for sign-in/consent/region-locked videos.")
+    st.markdown(
+        "Optional: provide YouTube cookies for sign-in/consent/region-locked videos.\n\n"
+        "1. Install the [Get cookies.txt](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc) Chrome extension.\n"
+        "2. Open youtube.com in Chrome while signed in.\n"
+        "3. Use the extension to export cookies.txt and upload it below."
+    )
     cookies_file = st.file_uploader("Upload cookies.txt", type=["txt"])
     if cookies_file is not None:
         cookies_path = Path("cookies.txt").absolute()
