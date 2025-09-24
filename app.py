@@ -3,7 +3,6 @@ from pathlib import Path
 from datetime import datetime
 import re
 import hmac
-from docx import Document
 import io
 from html2docx import html2docx
 
@@ -27,29 +26,7 @@ logging.basicConfig(
     format="%(levelname)s:%(name)s:%(message)s"
 )
 
-allow_non_youtube = st.checkbox(
-    "Allow non-YouTube links",
-    value=False,
-    help="Uncheck to only accept YouTube URLs"
-)
-
-# NEW: proxy toggle for non-YouTube
-use_proxy_for_non_yt = st.checkbox(
-    "Use proxy for non-YouTube links",
-    value=False,
-    help="Only enable if the site is geo/region locked or your network blocks it"
-)
-
-st.caption("Optional: provide YouTube cookies for sign-in/consent/region-locked videos.")
-cookies_file = st.file_uploader("Upload cookies.txt", type=["txt"])
-if cookies_file is not None:
-    # Save to a writable path
-    cookies_path = Path("cookies.txt").absolute()
-    cookies_path.write_bytes(cookies_file.read())
-    os.chmod(cookies_path, 0o600)
-    # Let downloader pick it up (downloader uses Config/env to add --cookies)
-    os.environ["YTDLP_COOKIES_FILE"] = str(cookies_path)
-    st.success(f"Cookies loaded: {cookies_path}")
+st.set_page_config(page_title="TrackGPT", layout="centered")
 
 def check_password():
     """Returns `True` if the user entered the correct password."""
@@ -81,11 +58,31 @@ if check_password():
     from output import generate_report_highlights, save_text_file, generate_report_bullets, generate_report_both
     
     # UI layout
-    st.set_page_config(page_title="TrackGPT", layout="centered")
     st.title("TrackGPT: Tracking Report Tool")
     url = "https://docs.google.com/document/d/1SR45h_w20Vn1-KrCRfAfkf2E2-aDvH-mXu8S2eA4630/edit?usp=sharing"
     st.markdown("Questions? Check out the [TrackGPT Instructions](%s)" % url)
     
+    allow_non_youtube = st.checkbox(
+        "Allow non-YouTube links",
+        value=False,
+        help="Uncheck to only accept YouTube URLs"
+    )
+
+    use_proxy_for_non_yt = st.checkbox(
+        "Use proxy for non-YouTube links",
+        value=False,
+        help="Only enable if the site is geo/region locked or your network blocks it"
+    )
+
+    st.caption("Optional: provide YouTube cookies for sign-in/consent/region-locked videos.")
+    cookies_file = st.file_uploader("Upload cookies.txt", type=["txt"])
+    if cookies_file is not None:
+        cookies_path = Path("cookies.txt").absolute()
+        cookies_path.write_bytes(cookies_file.read())
+        os.chmod(cookies_path, 0o600)
+        os.environ["YTDLP_COOKIES_FILE"] = str(cookies_path)
+        st.success(f"Cookies loaded: {cookies_path}")
+
     # Initialize session state
     if "step" not in st.session_state:
         st.session_state.step = "input"
@@ -100,10 +97,10 @@ if check_password():
     if "audio_path" not in st.session_state:
         st.session_state.audio_path = None
     if "transcript_docx" not in st.session_state:
-      st.session_state.transcript_docx = ""    
+        st.session_state.transcript_docx = ""
     
     # Restart button
-    if st.button("🔄 Restart"):
+    if st.button("Restart"):
         for key in list(st.session_state.keys()):
             if key != "password_correct":
                 del st.session_state[key]
@@ -174,7 +171,7 @@ if check_password():
         with col1:
             if st.button("Generate Highlights and Bullets"):
                 st.session_state.report_type = "both"
-        
+
         # Validate inputs and proceed
         if st.session_state.report_type and target_name and (transcript_input or uploaded_file or video_url):
             # Store data in session state
@@ -215,7 +212,7 @@ if check_password():
                                 st.session_state.audio_path = audio_path_str
                                 audio_path = audio_path_str          
                             else:
-                                st.error("Only YouTube links are enabled. Turn on “Allow non-YouTube links” to proceed.")
+                                st.error("Only YouTube links are enabled. Enable 'Allow non-YouTube links' to proceed.")
                                 st.stop()
 
                     # B) Uploaded file
@@ -232,7 +229,7 @@ if check_password():
                     if transcript_input:
                         transcript = transcript_input
                     else:
-                        audio_path = audio_path or st.session_state.get("audio_path")  # ← add this line (optional but helpful)
+                        audio_path = audio_path or st.session_state.get("audio_path")  # add this line (optional but helpful)
                         if not audio_path:
                             raise ValueError("No audio source available to transcribe.")
                         transcript = transcribe_file(audio_path, OPENAI_API_KEY, ASSEMBLYAI_API_KEY, target_name)
@@ -298,7 +295,7 @@ if check_password():
                 speaker_text = speaker_text + "\n" + speaker
             counter += 1
 
-        st.markdown("To edit a speaker, change the name only and do not delete the label. See [Instructions](%s) for more details.")
+        st.markdown("To edit a speaker, change the name only and do not delete the label. See [Instructions](%s) for more details." % url)
 
         edited_speaker = st.text_area(
             "Edit Speakers:",
@@ -309,7 +306,7 @@ if check_password():
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("Generate Report →"):
+            if st.button("Generate Report"):
                 # Update transcript with edits
                 transcript = re.sub(r'(\[\d+:\d+:\d+\] Speaker [A-Z])', r'</p><p>\1', edited_transcript)
                 transcript = '<p>' + transcript.strip() + '</p>'
@@ -365,7 +362,8 @@ if check_password():
         base_filename = f"{safe_name}_{timestamp}"
         output_dir = Path(Config.DEFAULT_OUTPUT_DIR)
         output_dir.mkdir(parents=True, exist_ok=True)
-        report_path = output_dir / f"{base_filename}_report.html"
+        html_path = output_dir / f"{base_filename}_report.html"
+        docx_path = output_dir / f"{base_filename}_report.docx"
         
         try:
             # Call higlight step from analyzer.py
@@ -469,10 +467,25 @@ if check_password():
             
             # Store results in session_state
             st.session_state.html_report = html
-            save_text_file(html, report_path)
+            save_text_file(html, html_path)
+
             st.session_state.docx_report = docx
-            save_text_file(docx, report_path)
-            
+            try:
+                docx_document = html2docx(
+                    st.session_state.docx_report,
+                    title=f"{st.session_state.target_name} Report"
+                )
+                docx_buffer = io.BytesIO()
+                docx_document.save(docx_buffer)
+                docx_bytes = docx_buffer.getvalue()
+                docx_path.write_bytes(docx_bytes)
+                st.session_state.docx_bytes = docx_bytes
+                st.session_state.docx_path = str(docx_path)
+            except Exception as docx_error:
+                st.session_state.docx_bytes = None
+                st.session_state.docx_path = None
+                st.warning(f"DOCX export failed: {docx_error}")
+
             # Prepare audio download if available
             if st.session_state.audio_path and isinstance(st.session_state.audio_path, str):
                 try:
@@ -486,13 +499,13 @@ if check_password():
             
         except Exception as e:
             st.error(f"Report generation failed: {e}")
-            if st.button("← Back to Edit Transcript"):
+            if st.button("Back to Edit Transcript"):
                 st.session_state.step = "edit_transcript"
                 st.rerun()
     
     # STEP 4: SHOW RESULTS
     elif st.session_state.step == "show_results":
-        st.success("✅ Report complete!")
+        st.success("Report complete!")
         
         # Show the report
         st.markdown(st.session_state.html_report, unsafe_allow_html=True)
@@ -502,7 +515,7 @@ if check_password():
         
         with col1:
             st.download_button(
-                "📄 Download HTML Report",
+                "Download HTML Report",
                 data=st.session_state.html_report,
                 file_name=f"{st.session_state.target_name}_report.html",
                 mime="text/html"
@@ -510,25 +523,28 @@ if check_password():
         
         with col2:
             if st.session_state.report_type in ['highlights', 'bullets', 'both', 'transcript_only']:
-                docx_buffer = html2docx(st.session_state.docx_report, title="Converted Document")
-                st.download_button(
-                    label="📝 Download DOCX",
-                    data=docx_buffer.getvalue(),
-                    file_name=f"{st.session_state.target_name}_report.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
-        
+                docx_bytes = st.session_state.get("docx_bytes")
+                if docx_bytes:
+                    st.download_button(
+                        label="Download DOCX",
+                        data=docx_bytes,
+                        file_name=f"{st.session_state.target_name}_report.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
+                else:
+                    st.caption("DOCX download is unavailable for this run.")
+
         with col3:
             if hasattr(st.session_state, 'mp3_data') and st.session_state.mp3_data:
                 st.download_button(
-                    "🎵 Download Audio File",
+                    "Download Audio File",
                     data=st.session_state.mp3_data,
                     file_name=f"{st.session_state.target_name}_audio.mp3",
                     mime="audio/mpeg"
                 )
         
         # Option to start over
-        if st.button("🔄 Create Another Report"):
+        if st.button("Create Another Report"):
             for key in list(st.session_state.keys()):
                 if key != "password_correct":
                     del st.session_state[key]
