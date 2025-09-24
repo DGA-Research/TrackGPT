@@ -984,13 +984,19 @@ def _apify_download_audio(url: str, output_dir: Path, base_filename: str) -> Opt
         return None
 
     # Build base payload (per actor input schema)
+    proxy_country = os.getenv("APIFY_PROXY_COUNTRY", "US")
+    preferred_format = os.getenv("APIFY_PREFERRED_FORMAT", "").strip() or None
+
     payload: dict[str, Any] = {
-        "videos": [{"url": url}],
-        "preferredFormat": "mp3",
-        "useApifyProxy": True,
-        "proxyCountry": os.getenv("APIFY_PROXY_COUNTRY", "US"),
+        "videoUrl": url,
+        "proxy": {
+            "useApifyProxy": True,
+            "apifyProxyCountry": proxy_country,
+        },
         "fileNameTemplate": base_filename,
     }
+    if preferred_format:
+        payload["preferredFormats"] = [preferred_format]
 
     # If GCS creds present, enable uploading; otherwise return links only
     gcs_key_raw = os.getenv("APIFY_GCS_SERVICE_JSON", "").strip()
