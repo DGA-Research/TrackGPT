@@ -11,6 +11,7 @@ import subprocess
 import logging
 import sys
 import json
+import os
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 from config import Config
@@ -97,6 +98,16 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
     output_path_template = output_dir / f"{base_filename}.%(ext)s"
     final_audio_path = output_dir / f"{base_filename}.{Config.AUDIO_FORMAT}"
 
+    cookies_source = os.getenv("YTDLP_COOKIES_FILE") or getattr(Config, "YTDLP_COOKIES_FILE", None)
+    cookies_args = []
+    if cookies_source:
+        cookies_path = Path(cookies_source).expanduser()
+        if cookies_path.exists():
+            cookies_args = ["--cookies", str(cookies_path)]
+            logging.info(f"Using cookies file: {cookies_path}")
+        else:
+            logging.warning(f"Cookies file not found at {cookies_path}. Continuing without cookies.")
+
     # Ensure the output directory exists, creating it if necessary
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -174,6 +185,9 @@ def download_audio(url: str, output_dir: Path, base_filename: str, type_input) -
         "--no-abort-on-error", # Continue if parts fail
         "-o", str(output_path_template), # Output filename template
     ]
+    if cookies_args:
+        cmd.extend(cookies_args)
+
     # Note: ffmpeg must be installed and in the system's PATH for audio format conversion.
     # The command execution will handle the download, audio extraction, conversion, and saving.
 
