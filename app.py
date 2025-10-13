@@ -516,8 +516,8 @@ if check_password():
             
                     st.session_state.transcript_docx = transcript_docx
                     st.session_state.transcript = transcript
-                        st.session_state.step = "generate_report"
-                        st.rerun()
+                    st.session_state.step = "generate_report"
+                    st.rerun()
     
     elif st.session_state.step == "bulk_results":
         st.header("Bulk Transcription Results")
