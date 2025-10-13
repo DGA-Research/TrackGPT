@@ -4,6 +4,7 @@ from datetime import datetime
 import re
 import hmac
 import io
+import zipfile
 from html2docx import html2docx
 
 from urllib.parse import urlsplit
@@ -25,6 +26,20 @@ logging.basicConfig(
     level=getattr(logging, level, logging.INFO),
     format="%(levelname)s:%(name)s:%(message)s"
 )
+
+def _safe_stem(name: str) -> str:
+    """Generate a filesystem-safe stem that avoids collisions where possible."""
+    cleaned = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in Path(name).stem)
+    cleaned = cleaned.strip("_")
+    return cleaned or "file"
+
+def _transcript_to_html(transcript_text: str) -> str:
+    """Convert a transcript string into simple paragraph-separated HTML."""
+    text = (transcript_text or "").strip()
+    if not text:
+        return "<p>No transcript content.</p>"
+    formatted = re.sub(r'(\[\d+:\d+:\d+\] Speaker [A-Z])', r'</p><p>\1', text)
+    return f"<p>{formatted}</p>"
 
 st.set_page_config(page_title="TrackGPT", layout="centered")
 
@@ -123,6 +138,16 @@ if check_password():
         st.session_state.audio_path = None
     if "transcript_docx" not in st.session_state:
         st.session_state.transcript_docx = ""
+    if "bulk_results" not in st.session_state:
+        st.session_state.bulk_results = []
+    if "bulk_zip_bytes" not in st.session_state:
+        st.session_state.bulk_zip_bytes = None
+    if "bulk_zip_filename" not in st.session_state:
+        st.session_state.bulk_zip_filename = ""
+    if "bulk_output_dir" not in st.session_state:
+        st.session_state.bulk_output_dir = ""
+    if "bulk_errors" not in st.session_state:
+        st.session_state.bulk_errors = []
     
     # Restart button
     if st.button("Restart"):
@@ -144,6 +169,7 @@ if check_password():
         type_input = False
         transcript_input = False
         uploaded_file = False
+        bulk_zip_file = None
         
         download_button = st.checkbox("Enter my own mp3, m4a or mp4 file")
         if download_button:
@@ -161,6 +187,11 @@ if check_password():
             transcript_input = st.text_area("Copy and paste transcript here", key="transcript_input")
             
         video_url = st.text_input("Enter a video or audio URL. See [Supported Sources](%s)" % url)
+
+        bulk_zip_enabled = st.checkbox("Upload a ZIP of audio files for bulk transcription")
+        if bulk_zip_enabled:
+            st.markdown(":blue-background[Bulk mode will transcribe each supported audio file in the archive and skip highlight/bullet generation.]")
+            bulk_zip_file = st.file_uploader("Upload ZIP archive", type=["zip"], key="bulk_zip")
 
         # Enter file type (only relevant for bullets)
         type_input = st.selectbox("Enter file type:", ["AUDIO", "VIDEO"])
@@ -193,105 +224,213 @@ if check_password():
         with col3:
             if st.button("Transcript Only"):
                 st.session_state.report_type = "transcript_only"
-        with col1:
+        col4, col5 = st.columns(2)
+        with col4:
             if st.button("Generate Highlights and Bullets"):
                 st.session_state.report_type = "both"
+        with col5:
+            if st.button("Bulk Transcriptions (ZIP)"):
+                st.session_state.report_type = "bulk_zip"
 
         # Validate inputs and proceed
-        if st.session_state.report_type and target_name and (transcript_input or uploaded_file or video_url):
-            # Store data in session state
-            st.session_state.target_name = target_name
-            st.session_state.metadata = {
-                'title': title,
-                'uploader': uploader,
-                'upload_date': upload_date,
-                'webpage_url': "N/A",
-                'extractor': platform,
-                'type_input': type_input
-            }
-            
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
-            base_filename = f"{safe_name}_{timestamp}"
-            output_dir = Path(Config.DEFAULT_OUTPUT_DIR)
-            output_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Process the input
-            with st.spinner("Processing input..."):
-                try:
-                    # --- Handle audio source selection ---
-                    audio_path = None
+        report_type = st.session_state.report_type
+        has_standard_input = bool(transcript_input or uploaded_file or video_url)
+        bulk_mode = report_type == "bulk_zip"
 
-                    # A) URL input
-                    if video_url:
-                            download_result = download_audio_no_apify(
-                                video_url,
-                                output_dir,
-                                base_filename,
-                                type_input,
-                            )
-                            if download_result:
-                                audio_path_str, metadata_update = download_result
-                                st.session_state.metadata.update(metadata_update or {})
-                                st.session_state.metadata["webpage_url"] = video_url
-                                if not st.session_state.metadata.get("extractor"):
-                                    st.session_state.metadata["extractor"] = "youtube" if is_youtube(video_url) else "generic"
-                                st.session_state.audio_path = audio_path_str
-                                audio_path = audio_path_str
+        if report_type:
+            if not target_name:
+                st.error("Please enter a Target Name")
+            elif bulk_mode:
+                if not bulk_zip_file:
+                    st.error("Please upload a ZIP file containing audio for bulk transcription")
+                else:
+                    st.session_state.target_name = target_name
+                    st.session_state.metadata = {}
+
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
+                    base_filename = f"{safe_name}_{timestamp}"
+                    output_dir = Path(Config.DEFAULT_OUTPUT_DIR)
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    bulk_output_dir = output_dir / f"{base_filename}_bulk"
+                    bulk_output_dir.mkdir(parents=True, exist_ok=True)
+
+                    supported_exts = {".mp3", ".m4a", ".mp4", ".wav", ".aac", ".flac", ".ogg", ".webm"}
+
+                    st.session_state.bulk_results = []
+                    st.session_state.bulk_zip_bytes = None
+                    st.session_state.bulk_zip_filename = ""
+                    st.session_state.bulk_output_dir = ""
+                    st.session_state.bulk_errors = []
+
+                    with st.spinner("Processing ZIP and transcribing files..."):
+                        try:
+                            bulk_zip_file.seek(0)
+                        except Exception:
+                            pass
+
+                        try:
+                            zip_bytes = bulk_zip_file.read()
+                            if not zip_bytes:
+                                raise ValueError("The uploaded ZIP file is empty.")
+
+                            transcripts = []
+                            used_stems = set()
+                            aggregate_buffer = io.BytesIO()
+                            errors = []
+
+                            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
+                                audio_members = [
+                                    member for member in archive.infolist()
+                                    if not member.is_dir() and Path(member.filename).suffix.lower() in supported_exts
+                                ]
+
+                                if not audio_members:
+                                    raise ValueError("No supported audio files (.mp3, .m4a, .mp4, .wav, .aac, .flac, .ogg, .webm) found in the ZIP.")
+
+                                with zipfile.ZipFile(aggregate_buffer, "w", zipfile.ZIP_DEFLATED) as transcripts_zip:
+                                    for index, member in enumerate(audio_members, start=1):
+                                        original_name = Path(member.filename).name
+                                        safe_stem = _safe_stem(original_name)
+                                        if safe_stem in used_stems:
+                                            safe_stem = f"{safe_stem}_{index}"
+                                        used_stems.add(safe_stem)
+
+                                        ext = Path(original_name).suffix.lower() or ".mp3"
+                                        audio_dest = bulk_output_dir / f"{safe_stem}{ext}"
+                                        audio_dest.write_bytes(archive.read(member))
+
+                                        try:
+                                            transcript_text = transcribe_file(str(audio_dest), OPENAI_API_KEY, ASSEMBLYAI_API_KEY, target_name).strip()
+                                        except Exception as member_exc:
+                                            log.error("Failed to transcribe %s: %s", original_name, member_exc)
+                                            errors.append(f"{original_name}: {member_exc}")
+                                            continue
+
+                                        text_dest = bulk_output_dir / f"{safe_stem}.txt"
+                                        save_text_file(transcript_text, text_dest)
+                                        transcripts_zip.writestr(f"{safe_stem}.txt", transcript_text)
+
+                                        transcripts.append({
+                                            "display_name": original_name,
+                                            "safe_name": safe_stem,
+                                            "transcript_text": transcript_text,
+                                            "transcript_html": _transcript_to_html(transcript_text),
+                                            "text_path": str(text_dest)
+                                        })
+
+                                if not transcripts:
+                                    raise ValueError("Transcription failed for all files in the ZIP.")
+
+                            aggregate_buffer.seek(0)
+                            st.session_state.bulk_results = transcripts
+                            st.session_state.bulk_zip_bytes = aggregate_buffer.getvalue()
+                            st.session_state.bulk_zip_filename = f"{base_filename}_transcripts.zip"
+                            st.session_state.bulk_output_dir = str(bulk_output_dir)
+                            st.session_state.bulk_errors = errors
+                            st.session_state.step = "bulk_results"
+                            st.rerun()
+
+                        except ValueError as bulk_error:
+                            st.error(f"Processing failed: {bulk_error}")
+                        except Exception as bulk_exc:
+                            st.error(f"Bulk transcription failed: {bulk_exc}")
+            else:
+                if not has_standard_input:
+                    st.error("Please provide a transcript, upload a file, or enter a URL")
+                else:
+                    # Store data in session state
+                    st.session_state.target_name = target_name
+                    st.session_state.metadata = {
+                        'title': title,
+                        'uploader': uploader,
+                        'upload_date': upload_date,
+                        'webpage_url': "N/A",
+                        'extractor': platform,
+                        'type_input': type_input
+                    }
+                    st.session_state.bulk_output_dir = ""
+                    st.session_state.bulk_results = []
+                    st.session_state.bulk_zip_bytes = None
+                    st.session_state.bulk_zip_filename = ""
+                    st.session_state.bulk_errors = []
+                    
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
+                    base_filename = f"{safe_name}_{timestamp}"
+                    output_dir = Path(Config.DEFAULT_OUTPUT_DIR)
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Process the input
+                    with st.spinner("Processing input..."):
+                        try:
+                            # --- Handle audio source selection ---
+                            audio_path = None
+
+                            # A) URL input
+                            if video_url:
+                                    download_result = download_audio_no_apify(
+                                        video_url,
+                                        output_dir,
+                                        base_filename,
+                                        type_input,
+                                    )
+                                    if download_result:
+                                        audio_path_str, metadata_update = download_result
+                                        st.session_state.metadata.update(metadata_update or {})
+                                        st.session_state.metadata["webpage_url"] = video_url
+                                        if not st.session_state.metadata.get("extractor"):
+                                            st.session_state.metadata["extractor"] = "youtube" if is_youtube(video_url) else "generic"
+                                        st.session_state.audio_path = audio_path_str
+                                        audio_path = audio_path_str
+                                    else:
+                                        st.error("Processing failed: unable to download audio from the provided URL. Upload a file or provide a transcript instead.")
+                                        st.stop()
+
+                            # B) Uploaded file
+                            elif uploaded_file:
+                                # Save uploaded file to the output dir with a safe name
+                                upload_ext = Path(uploaded_file.name).suffix.lower() or ".mp3"
+                                dest = output_dir / f"{base_filename}{upload_ext}"
+                                with open(dest, "wb") as f:
+                                    f.write(uploaded_file.read())
+                                st.session_state.audio_path = str(dest)
+                                audio_path = str(dest)
+
+                            # --- Transcript handling ---
+                            if transcript_input:
+                                transcript = transcript_input
                             else:
-                                st.error("Processing failed: unable to download audio from the provided URL. Upload a file or provide a transcript instead.")
-                                st.stop()
+                                audio_path = audio_path or st.session_state.get("audio_path")  # add this line (optional but helpful)
+                                if not audio_path:
+                                    raise ValueError("No audio source available to transcribe.")
+                                transcript = transcribe_file(audio_path, OPENAI_API_KEY, ASSEMBLYAI_API_KEY, target_name)
+                            # --- Format transcript HTML ---
+                            transcript = re.sub(r'(\[\d+:\d+:\d+\] Speaker [A-Z])', r'</p><p>\1', transcript)
+                            transcript = '<p>' + transcript.strip() + '</p>'
 
-                    # B) Uploaded file
-                    elif uploaded_file:
-                        # Save uploaded file to the output dir with a safe name
-                        upload_ext = Path(uploaded_file.name).suffix.lower() or ".mp3"
-                        dest = output_dir / f"{base_filename}{upload_ext}"
-                        with open(dest, "wb") as f:
-                            f.write(uploaded_file.read())
-                        st.session_state.audio_path = str(dest)
-                        audio_path = str(dest)
+                            # --- Extract speaker labels for editor ---
+                            pattern = r'\[[\d:.]+\]\s+(Speaker\s+[A-Z])\s+\(([^)]+)\):'
+                            matches = re.findall(pattern, transcript)
 
-                    # --- Transcript handling ---
-                    if transcript_input:
-                        transcript = transcript_input
-                    else:
-                        audio_path = audio_path or st.session_state.get("audio_path")  # add this line (optional but helpful)
-                        if not audio_path:
-                            raise ValueError("No audio source available to transcribe.")
-                        transcript = transcribe_file(audio_path, OPENAI_API_KEY, ASSEMBLYAI_API_KEY, target_name)
-                    # --- Format transcript HTML ---
-                    transcript = re.sub(r'(\[\d+:\d+:\d+\] Speaker [A-Z])', r'</p><p>\1', transcript)
-                    transcript = '<p>' + transcript.strip() + '</p>'
+                            unique_speakers = set()
+                            unique_speakers_edit = set()
 
-                    # --- Extract speaker labels for editor ---
-                    pattern = r'\[[\d:.]+\]\s+(Speaker\s+[A-Z])\s+\(([^)]+)\):'
-                    matches = re.findall(pattern, transcript)
+                            for speaker_id, name in matches:
+                                unique_speakers.add(f"{speaker_id} ({name})")
+                                unique_speakers_edit.add(f"{speaker_id}: {name}")
 
-                    unique_speakers = set()
-                    unique_speakers_edit = set()
+                            speaker_list = sorted(unique_speakers)
+                            speaker_list_text = sorted(unique_speakers_edit)
 
-                    for speaker_id, name in matches:
-                        unique_speakers.add(f"{speaker_id} ({name})")
-                        unique_speakers_edit.add(f"{speaker_id}: {name}")
+                            st.session_state.speaker_list = speaker_list
+                            st.session_state.speaker_list_text = speaker_list_text
+                            st.session_state.transcript = transcript
+                            st.session_state.step = "edit_transcript"
+                            st.rerun()
 
-                    speaker_list = sorted(unique_speakers)
-                    speaker_list_text = sorted(unique_speakers_edit)
-
-                    st.session_state.speaker_list = speaker_list
-                    st.session_state.speaker_list_text = speaker_list_text
-                    st.session_state.transcript = transcript
-                    st.session_state.step = "edit_transcript"
-                    st.rerun()
-
-                except Exception as e:
-                    st.error(f"Processing failed: {e}")
-
-        
-        elif st.session_state.report_type and not target_name:
-            st.error("Please enter a Target Name")
-        elif st.session_state.report_type and not (transcript_input or uploaded_file or video_url):
-            st.error("Please provide a transcript, upload a file, or enter a URL")
+                        except Exception as e:
+                            st.error(f"Processing failed: {e}")
     
     # STEP 2: EDIT TRANSCRIPT
     elif st.session_state.step == "edit_transcript":
@@ -377,8 +516,54 @@ if check_password():
             
                     st.session_state.transcript_docx = transcript_docx
                     st.session_state.transcript = transcript
-                    st.session_state.step = "generate_report"
-                    st.rerun()
+                        st.session_state.step = "generate_report"
+                        st.rerun()
+    
+    elif st.session_state.step == "bulk_results":
+        st.header("Bulk Transcription Results")
+
+        bulk_results = st.session_state.get("bulk_results", [])
+        bulk_output_dir = st.session_state.get("bulk_output_dir", "")
+        bulk_errors = st.session_state.get("bulk_errors", [])
+
+        if bulk_results:
+            st.success(f"Transcribed {len(bulk_results)} file{'s' if len(bulk_results) != 1 else ''}.")
+            if bulk_output_dir:
+                st.caption(f"Transcripts saved to `{bulk_output_dir}`")
+
+            if st.session_state.bulk_zip_bytes:
+                st.download_button(
+                    "Download All Transcripts (.zip)",
+                    data=st.session_state.bulk_zip_bytes,
+                    file_name=st.session_state.bulk_zip_filename or "transcripts.zip",
+                    mime="application/zip"
+                )
+
+            for record in bulk_results:
+                expander_label = f"{record['display_name']} -> {record['safe_name']}.txt"
+                with st.expander(expander_label):
+                    st.markdown(record["transcript_html"], unsafe_allow_html=True)
+                    st.download_button(
+                        "Download Transcript (.txt)",
+                        data=record["transcript_text"],
+                        file_name=f"{record['safe_name']}.txt",
+                        mime="text/plain",
+                        key=f"download_txt_{record['safe_name']}"
+                    )
+        else:
+            st.info("No transcripts were generated. Upload a ZIP with supported audio files to try again.")
+
+        if bulk_errors:
+            st.warning("Some files could not be transcribed:")
+            for error_message in bulk_errors:
+                st.caption(error_message)
+
+        if st.button("Create Another Report"):
+            for key in list(st.session_state.keys()):
+                if key != "password_correct":
+                    del st.session_state[key]
+            st.session_state.step = "input"
+            st.rerun()
     
     # STEP 3: GENERATE REPORT
     elif st.session_state.step == "generate_report":
@@ -577,4 +762,3 @@ if check_password():
                     del st.session_state[key]
             st.session_state.step = "input"
             st.rerun()
-
