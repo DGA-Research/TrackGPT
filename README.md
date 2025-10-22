@@ -121,3 +121,17 @@ python main.py "https://www.youtube.com/watch?v=rDexVZY3yYE" "Kanye West" -o ./r
 ```
 
 This command will download the audio from the specified YouTube URL, save intermediate files and the final report to the `./results` directory, focus the analysis on "Kanye West", and provide detailed logging output. If the audio file is large, it will automatically be chunked during transcription.
+
+## Local Bulk Transcription (No Upload Limits)
+
+Streamlit uploads top out around 200 MB, so very large archives are best handled locally. The repository now includes a helper CLI that ports the Streamlit bulk ZIP workflow to a pure Python script:
+
+```bash
+python bulk_transcribe_cli.py --input /path/to/folder-or-zip --target "Target Name"
+```
+
+* Accepts a directory of audio files, a single supported audio file, or a ZIP archive (`.mp3`, `.m4a`, `.mp4`, `.wav`, `.aac`, `.flac`, `.ogg`, `.webm`).
+* Grabs API keys from the environment (or override with `--openai-key` / `--assemblyai-key`).
+* Writes transcripts to a timestamped folder under `output/` and creates `transcripts.zip` by default (use `--no-zip` to skip the archive).
+
+> Tip: Populate a local `.env` with `OPENAI_API_KEY=` and `ASSEMBLYAI_API_KEY=` so both the CLI and Streamlit app can reuse the same credentials.
