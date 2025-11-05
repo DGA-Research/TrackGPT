@@ -1,58 +1,81 @@
 import os
+import sys
+from typing import Optional
+
 from dotenv import load_dotenv
-import sys # Import sys for sys.stderr and sys.exit
-import streamlit as st
+
+try:
+    import streamlit as st
+except ImportError:  # Allow non-Streamlit contexts (e.g., CLI usage)
+    st = None  # type: ignore
 
 load_dotenv()
 
+
 class ConfigError(Exception):
     """Custom exception for configuration errors."""
-    pass
+
+
+def _get_secret(name: str, default: Optional[str] = None) -> Optional[str]:
+    """
+    Fetch a credential from Streamlit secrets when available, else environment variables.
+
+    Accessing st.secrets[...] raises StreamlitSecretNotFoundError when missing; guard accordingly so
+    CLI usage (without Streamlit) still works.
+    """
+    # Streamlit present and secrets populated
+    if st is not None and getattr(st, "secrets", None) is not None:
+        try:
+            value = st.secrets[name]
+            if isinstance(value, str) and value.strip():
+                return value
+        except Exception:
+            pass
+
+    value = os.getenv(name, default)
+    if isinstance(value, str) and value.strip():
+        return value
+    return default
+
 
 class Config:
     """
     Central configuration class for the application.
-    
-    All sensitive credentials are loaded from environment variables.
-    Required variables must be set in a .env file or environment.
-    
-    Usage:
-    1. Create a .env file with required variables
-    2. Access config via Config.CONSTANT_NAME
-    3. Call Config.validate() to check required settings
-    
-    Security Note:
-    - Never commit .env files to version control
-    - Use environment variables in production
+
+    Credentials are sourced from Streamlit secrets (when running via UI) or environment variables
+    / .env files for CLI and local workflows.
     """
 
     # --- Essential ---
-    OPENAI_API_KEY: str = st.secrets["OPENAI_API_KEY"]  # Required OpenAI API key
-    ASSEMBLYAI_API_KEY: str = st.secrets["ASSEMBLYAI_API_KEY"] # AssemblyAI API key
+    OPENAI_API_KEY: Optional[str] = _get_secret("OPENAI_API_KEY")
+    ASSEMBLYAI_API_KEY: Optional[str] = _get_secret("ASSEMBLYAI_API_KEY")
 
     # --- Models ---
-    WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "whisper-1")  # Default transcription model
-    ANALYSIS_MODEL: str = os.getenv("ANALYSIS_MODEL", "gpt-4.1-mini")  # Default analysis model
+    WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "whisper-1")
+    ANALYSIS_MODEL: str = os.getenv("ANALYSIS_MODEL", "gpt-4.1-mini")
 
     # --- Processing ---
-    AUDIO_FORMAT: str = os.getenv("AUDIO_FORMAT", "mp3")  # Default audio format for downloads
+    AUDIO_FORMAT: str = os.getenv("AUDIO_FORMAT", "mp3")
 
     # --- Output ---
-    DEFAULT_OUTPUT_DIR: str = os.getenv("OUTPUT_DIR", "output")  # Directory for generated files
+    DEFAULT_OUTPUT_DIR: str = os.getenv("OUTPUT_DIR", "output")
 
     @classmethod
     def validate(cls) -> None:
-        """Validate required configuration"""
+        """Validate required configuration."""
         if not cls.OPENAI_API_KEY:
             raise ConfigError(
-                "ERROR: OPENAI_API_KEY is not set. "
-                "Please create a .env file and add your OpenAI API key."
+                "ERROR: Missing OPENAI_API_KEY. Set it in .env or Streamlit secrets."
             )
-        print("Configuration validated.") # Add confirmation
+        if not cls.ASSEMBLYAI_API_KEY:
+            raise ConfigError(
+                "ERROR: Missing ASSEMBLYAI_API_KEY. Set it in .env or Streamlit secrets."
+            )
+
 
 # Validate configuration immediately upon import
 try:
     Config.validate()
-except ConfigError as e:
-    print(str(e), file=sys.stderr)
-    sys.exit(1) # Exit if config is invalid
+except ConfigError as exc:
+    print(str(exc), file=sys.stderr)
+    sys.exit(1)
