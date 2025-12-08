@@ -1,137 +1,123 @@
-# Video Research Transcriber and Analyzer
+# TrackGPT Research Pipeline
 
-A Python tool designed to automate the process of researching video content. It downloads audio using `yt-dlp`, transcribes it via the OpenAI Whisper API (automatically handling large files via chunking), extracts structured factual statements about a specified target using the OpenAI GPT API, and generates a comprehensive HTML report.
+TrackGPT combines a Streamlit front end, a downloading/transcription toolchain, and LLM-powered analysis prompts to turn long-form video or audio sources into structured tracking reports. The app can ingest hosted URLs, local files, or bulk ZIP archives, then transcribe via AssemblyAI, enrich speaker labels with OpenAI, and finally extract highlights/bullet points plus a formatted transcript.
 
-## Overview
+## Highlights
+- End-to-end workflow from video URL to HTML/DOCX report with transcripts, highlights, and bullet points.
+- Automatic metadata capture (`yt-dlp`), optional cookies upload for signed-in/region-locked content, and resilient retries.
+- AssemblyAI transcript generation with timestamped speaker diarization; OpenAI models add speaker names and run prompt-engineered extraction.
+- Choice of report modes (highlights, bullets, both, or transcript-only) plus download buttons for audio, HTML, DOCX.
+- Bulk transcription mode in both UI and CLI to process folders or ZIP archives beyond Streamlit upload limits.
 
-This script streamlines the analysis of video/audio sources by performing the following steps:
+## Streamlit Hosted App Link:
+https://trackgpt-b9fpyc9vm5dlimhcs9nr2q.streamlit.app/
 
-1.  **Download:** Fetches audio and associated metadata from a given URL (e.g., YouTube, Vimeo) using `yt-dlp`.
-2.  **Transcribe:** Converts the downloaded audio into text using OpenAI's Whisper API. **Crucially, it automatically detects files exceeding the Whisper API's ~25MB size limit and splits them into smaller, overlapping chunks using `ffmpeg` before transcription.** Failed chunks do not stop the process; partial transcripts are combined.
-3.  **Extract:** Analyzes the full transcript using an OpenAI GPT model (e.g., GPT-4o Mini) with a carefully engineered prompt to identify and extract key factual statements, claims, or commitments related to a specific target person/entity. This step captures structured data (**Headline, Speaker, Body, Source, Date**) via text delimiters parsed by the script.
-4.  **Report:** Generates a self-contained, formatted HTML report containing the video metadata, extracted bullet points (with title-cased headlines, verbatim body quotes, source/date citations, and links), and the full transcript for verification.
+## Architecture & Modules
+| Component | Responsibility |
+| --- | --- |
+| `app.py` | Streamlit UX, password gating, session-state workflow (input -> transcript editing -> report generation -> downloads). |
+| `config.py` | Loads API keys from Streamlit secrets or env vars and validates they exist before anything else runs. |
+| `downloader.py` | Wraps `yt-dlp` + `ffmpeg` to fetch audio, normalize metadata, and honor optional cookies. |
+| `transcriber.py` | Sends audio to AssemblyAI for diarized transcripts, chunking long utterances and optionally using OpenAI to append human-readable speaker names. |
+| `analyzer.py` + `prompts.py` | Prompt-engineered OpenAI calls for two report styles (highlights vs. structured bullets) with `tenacity`-based retries. |
+| `output.py` | Builds HTML and DOCX-ready markup, strict title casing, and saves transcript/analysis files. |
+| `bulk_transcribe_cli.py` | Headless entry point mirroring the UI bulk ZIP workflow. |
 
-## Key Features
-
-*   **Automated Pipeline:** Full workflow from URL to structured HTML report.
-*   **Metadata Extraction:** Captures video title, uploader, date, duration, etc., using `yt-dlp`.
-*   **Robust Transcription:** Leverages OpenAI's Whisper API and **automatically handles large audio files (>24MB) via `ffmpeg`-based chunking** with configurable overlap, ensuring complete transcription without hitting API limits. Handles individual chunk failures gracefully.
-*   **Structured Analysis:** Extracts key information about a target into structured bullet points (**Headline, Speaker, Body, Source, Date**) using an OpenAI GPT model and sophisticated prompt engineering.
-*   **Comprehensive Reporting:** Generates a clean, readable HTML report with a dynamic title, metadata, formatted & cited bullet points, and the full transcript.
-*   **Robust Error Handling:** Includes retries for GPT API calls (`tenacity`), handles chunk transcription failures, and implements retries for temporary file cleanup on Windows.
-*   **Flexible Usage:** Supports skipping specific steps (download, transcription, extraction) if intermediate files exist.
-*   **Configurable:** Settings managed via a `.env` file (API keys, models, output format, default overlap).
-*   **Command-Line Interface:** Easy to use via CLI arguments.
+## Repository Layout
+```text
+TrackGPT-main/
++-- app.py                  # Streamlit application
++-- analyzer.py             # Highlight/bullet extraction
++-- bulk_transcribe_cli.py  # Offline transcription helper
++-- config.py               # Configuration loader & validation
++-- config.toml             # Streamlit server tweaks (max upload size, watched dirs)
++-- downloader.py           # yt-dlp + ffmpeg wrapper
++-- output.py               # Report generation helpers
++-- prompts.py              # Prompt templates used by analyzer
++-- transcriber.py          # AssemblyAI + OpenAI speaker labeling
++-- requirements.txt        # Python dependencies
++-- secrets.toml            # Sample Streamlit secrets file (replace with your values)
++-- output/                 # Created at runtime; holds transcripts & reports
+```
 
 ## Requirements
+### Services & API Keys
+- `OPENAI_API_KEY` - used for speaker labeling and highlight/bullet extraction.
+- `ASSEMBLYAI_API_KEY` - used for diarized transcription.
+- Optional: YouTube cookies file (`YTDLP_COOKIES_FILE`) for age-restricted/region-locked downloads.
 
-*   **Python:** Version 3.8 or higher.
-*   **OpenAI API Key:** Required for transcription and analysis. Obtain from [OpenAI Platform](https://platform.openai.com/).
-*   **External Tools:**
-    *   `yt-dlp`: Command-line tool for downloading video/audio. ([Installation](https://github.com/yt-dlp/yt-dlp#installation))
-    *   `ffmpeg` **and** `ffprobe`: Command-line tools for audio processing. **Crucial for both audio format conversion (by `yt-dlp`) and the automatic audio chunking functionality in the transcriber.** ([Download](https://ffmpeg.org/download.html))
-    *   All three (`yt-dlp`, `ffmpeg`, `ffprobe`) must be installed and accessible in your system's PATH.
-*   **Python Packages:** Listed in `requirements.txt` (if you create one). Key dependencies include:
-    *   `openai`: For interacting with OpenAI APIs.
-    *   `python-dotenv`: For managing environment variables.
-    *   `yt-dlp`: Python wrapper (used for metadata extraction).
-    *   `tenacity`: For robust GPT API call retries.
-    *   *(Note: `pydub` is no longer required if using the `ffmpeg`-based chunking in the latest `transcriber.py`)*
+### Python
+- Python 3.9+ (Streamlit + AssemblyAI SDK both support 3.9-3.12).
+- Install dependencies: `pip install -r requirements.txt` (Streamlit itself is expected to come from your environment).
 
-## Setup
+### System Binaries
+- [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) in `PATH`.
+- [`ffmpeg` and `ffprobe`](https://ffmpeg.org/download.html) in `PATH` (audio extraction + duration probing).
 
-1.  **Clone the Repository:**
-    ```bash
-    git clone https://github.com/sh-patterson/TrackGPT-Audio
-    cd TrackGPT-Audio
-    ```
-
-2.  **Create and Activate Virtual Environment (Recommended):**
-    ```bash
-    python -m venv .venv
-    # Windows
-    .venv\Scripts\activate
-    # macOS/Linux
-    source .venv/bin/activate
-    ```
-
-3.  **Install Python Dependencies:**
-    ```bash
-    # Ensure you have a requirements.txt file reflecting the dependencies listed above, or install manually:
-    pip install openai python-dotenv yt-dlp tenacity
-    ```
-    *(Create/update a `requirements.txt` file for easier setup: `pip freeze > requirements.txt`)*
-
-4.  **Install `yt-dlp`, `ffmpeg`, and `ffprobe`:**
-    Follow the installation instructions linked in the [Requirements](#requirements) section to ensure these are installed and available in your system's PATH. **Verify `ffmpeg` and `ffprobe` installation, as they are essential for the chunking feature.**
-
-5.  **Configure OpenAI API Key (Required):**
-    *   Create a file named `.env` in the project root directory.
-    *   Add your OpenAI API key to the `.env` file:
-        ```dotenv
-        OPENAI_API_KEY=your-actual-api-key-here
-        ```
-    *   **Security:** Never commit your `.env` file to version control. Add `.env` to your `.gitignore` file.
-
-6.  **Optional Configuration (in `.env`):**
-    You can override default settings by adding these variables to your `.env` file:
-    ```dotenv
-    # Model for transcription (via OpenAI API)
-    WHISPER_MODEL=whisper-1
-
-    # Model for analysis/extraction (via OpenAI API)
-    ANALYSIS_MODEL=gpt-4o-mini # Or your preferred model like gpt-4-turbo
-
-    # Directory for output files
-    DEFAULT_OUTPUT_DIR=output
-
-    # Audio format for downloads (requires ffmpeg)
-    AUDIO_FORMAT=mp3
-
-    # --- Transcriber Specific (Optional) ---
-    # Overlap in seconds for audio chunking (default is 2 if not set)
-    # DEFAULT_OVERLAP_SECONDS=2
-    ```
-
-## Usage
-
-Run the script from your terminal using the following structure:
-
-```bash
-python main.py "<VIDEO_URL>" "<TARGET_NAME>" [OPTIONS]
+## Configuration
+### Streamlit Secrets
+Create `.streamlit/secrets.toml` (or update the provided `secrets.toml` before deploying) with:
+```toml
+OPENAI_API_KEY = "sk-..."
+ASSEMBLYAI_API_KEY = "..."
+password = "choose-a-ui-password"
 ```
-
-**Arguments:**
-
-*   `<VIDEO_URL>`: The URL of the video/audio source (enclose in quotes if it contains special characters).
-*   `<TARGET_NAME>`: The name of the person or entity to focus the analysis on (enclose in quotes if it contains spaces).
-
-**Options:**
-
-*   `-o DIRECTORY`, `--output_dir DIRECTORY`: Specify the directory for output files (default: `output`).
-*   `--skip_download`: Skip downloading audio (requires the expected audio file to exist in the output directory).
-*   `--skip_transcription`: Skip audio transcription (requires the expected transcript `.txt` file to exist).
-*   `--skip_extraction`: Skip bullet point extraction using the GPT model.
-*   `-v`, `--verbose`: Enable DEBUG level logging for more detailed output.
-
-**Example:**
-
-```bash
-python main.py "https://www.youtube.com/watch?v=rDexVZY3yYE" "Kanye West" -o ./results --verbose
+### CLI / Local Scripts
+For CLI workflows, place the same keys in a `.env` file (loaded via `python-dotenv`):
+```dotenv
+OPENAI_API_KEY=sk-...
+ASSEMBLYAI_API_KEY=...
+WHISPER_MODEL=whisper-1           # optional override
+ANALYSIS_MODEL=gpt-4o-mini        # optional override
+DEFAULT_OUTPUT_DIR=output         # default already
+AUDIO_FORMAT=mp3
 ```
+The config layer validates keys at import time; launching `streamlit run app.py` without the keys exits immediately.
 
-This command will download the audio from the specified YouTube URL, save intermediate files and the final report to the `./results` directory, focus the analysis on "Kanye West", and provide detailed logging output. If the audio file is large, it will automatically be chunked during transcription.
+## Running the Streamlit Workflow
+1. **Install dependencies** and launch: `streamlit run app.py`. (The provided `config.toml` already raises `maxUploadSize` to 400 MB.)
+2. **Authenticate** - the app is password protected via `st.secrets["password"]`.
+3. **Step 1 - Input Source**
+   - Provide a video/audio URL, upload an mp3/m4a/mp4, or paste an existing transcript.
+   - Optionally upload a `cookies.txt` (via the "Get cookies.txt" browser extension) for signed-in YouTube access. The file is stored with 0600 perms and its path exported via `YTDLP_COOKIES_FILE`.
+   - Toggle "Upload ZIP" to enter **bulk mode**: each supported file in the archive is transcribed, but highlights/bullets are skipped-results show per-file transcripts plus a downloadable ZIP.
+   - Supply optional metadata (title, air date, source station, headline, logo URLs, notes) that feeds the final report header.
+   - Choose report type: `Highlights`, `Bullets`, `Both`, or `Transcript Only`.
+4. **Step 2 - Review & Edit Transcript**
+   - Listen to the auto-downloaded audio, edit the transcript text directly, and adjust speaker labels. The UI enforces that labels (`Speaker A`, `Speaker B`, .) stay intact while letting you change the display names.
+5. **Step 3 - Generate Report**
+   - Depending on report type, the app calls `analyzer.extract_raw_data_from_text` with either the highlight or bullet prompt template (or both) and then formats the output via `output.py` helpers.
+   - `html2docx` converts the HTML to a DOCX for word-processor delivery. HTML, DOCX, and the source transcript land in `output/<target>_<timestamp>_report.*`.
+6. **Step 4 - Download Results**
+   - Buttons provide HTML, DOCX (when conversion succeeds), and the original audio (`.mp3`) when available. Restart clears state without logging you out.
 
-## Local Bulk Transcription (No Upload Limits)
-
-Streamlit uploads top out around 200 MB, so very large archives are best handled locally. The repository now includes a helper CLI that ports the Streamlit bulk ZIP workflow to a pure Python script:
-
+## Bulk Transcription CLI
+Use the bundled helper to bypass Streamlit upload limits entirely:
 ```bash
-python bulk_transcribe_cli.py --input /path/to/folder-or-zip --target "Target Name"
+python bulk_transcribe_cli.py --input path/to/folder-or-zip \
+    --target "Target Name" \
+    --output-dir output/bulk_$(date +%Y%m%d)
 ```
+Key flags:
+- `--input` accepts a single audio file, a directory, or a ZIP archive (extensions: mp3/m4a/mp4/wav/aac/flac/ogg/webm).
+- `--target` seeds the speaker-labeling hint used by `transcriber.py`.
+- `--no-zip` skips creating an aggregate `transcripts.zip`.
+- `--openai-key` / `--assemblyai-key` override the `.env` values per run.
+The CLI stages files in a temp folder, runs `transcribe_file` for each, writes `<stem>.txt` into the output directory, and (optionally) bundles them into `transcripts.zip`.
 
-* Accepts a directory of audio files, a single supported audio file, or a ZIP archive (`.mp3`, `.m4a`, `.mp4`, `.wav`, `.aac`, `.flac`, `.ogg`, `.webm`).
-* Grabs API keys from the environment (or override with `--openai-key` / `--assemblyai-key`).
-* Writes transcripts to a timestamped folder under `output/` and creates `transcripts.zip` by default (use `--no-zip` to skip the archive).
+## Output Artifacts
+- `output/<target>_<timestamp>_report.html` - Share-ready HTML (metadata header, highlights/bullets, transcript).
+- `output/<target>_<timestamp>_report.docx` - Word export of the same content.
+- `output/<stem>.txt` - Plain-text transcripts saved both from the UI and CLI.
+- Optional `transcripts.zip` - Bulk CLI aggregate.
+- Uploaded cookies are written to `cookies.txt` in the repo root and reused by `yt-dlp` for the session.
 
-> Tip: Populate a local `.env` with `OPENAI_API_KEY=` and `ASSEMBLYAI_API_KEY=` so both the CLI and Streamlit app can reuse the same credentials.
+## Troubleshooting & Tips
+- **`ffmpeg` / `yt-dlp` not found:** Confirm both commands run from your shell; the downloader exits early otherwise.
+- **Import errors at startup:** `config.Config` validates keys immediately, so missing API keys manifest as `ConfigError` before Streamlit renders.
+- **Large files:** Use the built-in chunking (automatic) or compress locally. The UI surfaces a link to a browser-based compressor for >600 MB uploads.
+- **Rate limits:** `tenacity` retries OpenAI calls (up to 6 attempts for bullet extraction). Persistent failures show inline errors; rerun after waiting.
+- **DOCX export failures:** The report still saves as HTML. Check console logs for `html2docx` errors; often caused by unsupported HTML tags.
+- **Resetting state:** Use the "Restart" button; it clears everything except the password flag, ensuring secrets aren't re-entered repeatedly.
+
+With this structure you can confidently describe, run, and extend TrackGPT's ingestion -> transcription -> analysis pipeline.
