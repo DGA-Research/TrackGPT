@@ -115,13 +115,20 @@ if check_password():
         "2. Open youtube.com in Chrome while signed in.\n"
         "3. Use the extension to export cookies.txt and upload it below."
     )
-    cookies_file = st.file_uploader("Upload cookies.txt", type=["txt"])
-    if cookies_file is not None:
-        cookies_path = Path("cookies.txt").absolute()
-        cookies_path.write_bytes(cookies_file.read())
-        os.chmod(cookies_path, 0o600)
-        os.environ["YTDLP_COOKIES_FILE"] = str(cookies_path)
-        st.success(f"Cookies loaded: {cookies_path}")
+cookies_file = st.file_uploader("Upload cookies.txt", type=["txt"])
+cookies_path = Path("cookies.txt").absolute()
+
+if cookies_file is not None:
+    cookies_path.write_bytes(cookies_file.getvalue())
+    os.chmod(cookies_path, 0o600)
+    os.environ["YTDLP_COOKIES_FILE"] = str(cookies_path)
+    st.success(f"Cookies loaded: {cookies_path}")
+else:
+    os.environ.pop("YTDLP_COOKIES_FILE", None)
+    try:
+        cookies_path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
     # Initialize session state
     if "step" not in st.session_state:
