@@ -69,13 +69,21 @@ if check_password():
     from config import Config
     import downloader as downloader_module
 
+    def _get_ytdlp_proxy() -> str:
+        """Return the yt-dlp proxy URL without logging or displaying the secret."""
+        try:
+            proxy = st.secrets.get("YTDLP_PROXY", "")
+        except Exception:
+            proxy = ""
+        return (proxy or os.getenv("YTDLP_PROXY", "")).strip()
+
     def download_audio_no_apify(
         url: str,
         output_dir: Path,
         base_filename: str,
         type_input,
     ):
-        """Wrapper around downloader.download_audio that skips Apify fallbacks."""
+        """Run the downloader without Apify fallbacks and optionally through a proxy."""
         original_apify = getattr(downloader_module, "_apify_download_audio", None)
         original_ytdl = getattr(downloader_module, "_apify_ytdl_fallback", None)
 
@@ -83,11 +91,21 @@ if check_password():
             log.info("Apify fallback disabled for this run.")
             return None
 
+        proxy = _get_ytdlp_proxy()
+        proxy_vars = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
+        old_proxy_env = {name: os.environ.get(name) for name in proxy_vars}
+
         try:
+            if proxy:
+                for name in proxy_vars:
+                    os.environ[name] = proxy
+                log.info("Using configured yt-dlp proxy.")
+
             if original_apify is not None:
                 downloader_module._apify_download_audio = _disabled
             if original_ytdl is not None:
                 downloader_module._apify_ytdl_fallback = _disabled
+
             return downloader_module.download_audio(
                 url,
                 output_dir,
@@ -99,6 +117,12 @@ if check_password():
                 downloader_module._apify_download_audio = original_apify
             if original_ytdl is not None:
                 downloader_module._apify_ytdl_fallback = original_ytdl
+
+            for name, old_value in old_proxy_env.items():
+                if old_value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = old_value
 
     from transcriber import transcribe_file
     from analyzer import extract_raw_data_from_text
@@ -115,20 +139,20 @@ if check_password():
         "2. Open youtube.com in Chrome while signed in.\n"
         "3. Use the extension to export cookies.txt and upload it below."
     )
-cookies_file = st.file_uploader("Upload cookies.txt", type=["txt"])
-cookies_path = Path("cookies.txt").absolute()
+    cookies_file = st.file_uploader("Upload cookies.txt", type=["txt"])
+    cookies_path = Path("cookies.txt").absolute()
 
-if cookies_file is not None:
-    cookies_path.write_bytes(cookies_file.getvalue())
-    os.chmod(cookies_path, 0o600)
-    os.environ["YTDLP_COOKIES_FILE"] = str(cookies_path)
-    st.success(f"Cookies loaded: {cookies_path}")
-else:
-    os.environ.pop("YTDLP_COOKIES_FILE", None)
-    try:
-        cookies_path.unlink(missing_ok=True)
-    except OSError:
-        pass
+    if cookies_file is not None:
+        cookies_path.write_bytes(cookies_file.getvalue())
+        os.chmod(cookies_path, 0o600)
+        os.environ["YTDLP_COOKIES_FILE"] = str(cookies_path)
+        st.success(f"Cookies loaded: {cookies_path}")
+    else:
+        os.environ.pop("YTDLP_COOKIES_FILE", None)
+        try:
+            cookies_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     # Initialize session state
     if "step" not in st.session_state:
