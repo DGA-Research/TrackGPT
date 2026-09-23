@@ -257,7 +257,7 @@ else:
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
                     base_filename = f"{safe_name}_{timestamp}"
-                    output_dir = Path(Config.DEFAULT_OUTPUT_DIR)
+                    output_dir = Path("output")
                     output_dir.mkdir(parents=True, exist_ok=True)
                     bulk_output_dir = output_dir / f"{base_filename}_bulk"
                     bulk_output_dir.mkdir(parents=True, exist_ok=True)
@@ -365,7 +365,7 @@ else:
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     safe_name = "".join(c if c.isalnum() else "_" for c in target_name)
                     base_filename = f"{safe_name}_{timestamp}"
-                    output_dir = Path(Config.DEFAULT_OUTPUT_DIR)
+                    output_dir = Path("output")
                     output_dir.mkdir(parents=True, exist_ok=True)
                     
                     # Process the input
@@ -579,7 +579,7 @@ else:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_name = "".join(c if c.isalnum() else "_" for c in st.session_state.target_name)
         base_filename = f"{safe_name}_{timestamp}"
-        output_dir = Path(Config.DEFAULT_OUTPUT_DIR)
+        output_dir = Path("output")
         output_dir.mkdir(parents=True, exist_ok=True)
         html_path = output_dir / f"{base_filename}_report.html"
         docx_path = output_dir / f"{base_filename}_report.docx"
