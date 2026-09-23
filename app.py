@@ -193,7 +193,7 @@ else:
         if transcript_button:
             transcript_input = st.text_area("Copy and paste transcript here", key="transcript_input")
             
-        video_url = st.text_input("Enter a video or audio URL. See [Supported Sources](%s)" % url)
+        video_url = st.text_input("Enter a video or audio URL")
 
         bulk_zip_enabled = st.checkbox("Upload a ZIP of audio files for bulk transcription")
         if bulk_zip_enabled:
